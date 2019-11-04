@@ -3680,12 +3680,15 @@ void print_type(uint64_t type) {
 }
 
 void type_warning(uint64_t expected, uint64_t found) {
+  if (incremental == 1)
+    return;
+
   print_line_number("warning", line_number);
   print("type mismatch, ");
   print_type(expected);
   print(" expected but ");
   print_type(found);
-  print(" found\n");
+  print(" found\n");  
 }
 
 uint64_t* get_variable_or_big_int(char* variable_or_big_int, uint64_t class) {
@@ -12726,7 +12729,7 @@ void selfie_increment() {
     reset_increment_file_cursor();
    
     if (syntax_error == 0) {
-      if (is_valid_call()) {print("is_valid_call()\n");
+      if (is_valid_call()) {
          
         if (report_undefined_procedures() == 0) {
           // save address to jump to for later
