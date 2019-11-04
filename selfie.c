@@ -1958,6 +1958,8 @@ char* INCREMENT_FILENAME = (char*) 0;
 // indicate if compiler is in incremental mode or not
 uint64_t incremental  = 0;
 uint64_t syntax_error = 0;
+uint64_t eval_expression = 0;
+uint64_t single_procedure_call = 0;
 
 // position where the jump to the called procedure will be generated
 uint64_t entry_point_incremental  = 0;
@@ -1991,6 +1993,7 @@ void init_incrementer() {
   binary_length = code_length;
   binary_length_checkpoint = binary_length;
 }
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     L I B R A R Y     ---------------------
@@ -2874,7 +2877,7 @@ uint64_t find_next_character() {
       if (in_multi_line_comment) {
         // keep track of line numbers for error reporting and code annotation
         if (character == CHAR_LF)
-          // only line feeds count, not carriage returns
+          // only linefeeds count, not carriage returns
           line_number = line_number + 1;
         else if (character == CHAR_EOF) {
           // multi-line comment is not terminated
@@ -5049,7 +5052,7 @@ void compile_cstar() {
 
           allocated_memory = allocated_memory - REGISTERSIZE;
         }
-
+	eval_expression = 0;
         syntax_error = 0;
         // undo last code generation by resetting binary_length
         binary_length = binary_length_checkpoint;
@@ -5059,6 +5062,12 @@ void compile_cstar() {
         binary_length_checkpoint = binary_length;
 
       latest_hashed_entry_address = (uint64_t*) 0;
+      
+      if (eval_expression) {
+	// trigger call of eval-function
+	source_fd = open_write_only(INCREMENT_FILENAME);
+	write(source_fd, "eval()", string_length("eval()"));
+      }
     }
   }
 }
@@ -5190,7 +5199,7 @@ void emit_bootstrapping() {
     } else {
       // assert: stack is set up with argv pointer still missing
       //
-    //    sp
+      //    $sp
       //     |
       //     V
       // | argc | argv[0] | argv[1] | ... | argv[n]
@@ -5199,7 +5208,7 @@ void emit_bootstrapping() {
 
       // first obtain pointer to argv
       //
-    //    sp + REGISTERSIZE
+      //    $sp + REGISTERSIZE
       //            |
       //            V
       // | argc | argv[0] | argv[1] | ... | argv[n]
@@ -5287,81 +5296,80 @@ void selfie_compile() {
     while (link) {
       if (number_of_remaining_arguments() == 0)
         link = 0;
-    else if (load_character(peek_argument(0), 0) == '-')
+      else if (load_character(peek_argument(0), 0) == '-')
         link = 0;
-      else {
-        source_name = get_argument();
+        else {
+          source_name = get_argument();
 
-        number_of_source_files = number_of_source_files + 1;
+          number_of_source_files = number_of_source_files + 1;
 
-        printf2("%s: selfie compiling %s with starc\n", selfie_name, source_name);
+          printf2("%s: selfie compiling %s with starc\n", selfie_name, source_name);
 
-        // assert: source_name is mapped and not longer than MAX_FILENAME_LENGTH
+          // assert: source_name is mapped and not longer than MAX_FILENAME_LENGTH
 
-        source_fd = sign_extend(open(source_name, O_RDONLY, 0), SYSCALL_BITWIDTH);
+          source_fd = sign_extend(open(source_name, O_RDONLY, 0), SYSCALL_BITWIDTH);
 
-        if (signed_less_than(source_fd, 0)) {
-          printf2("%s: could not open input file %s\n", selfie_name, source_name);
+          if (signed_less_than(source_fd, 0)) {
+            printf2("%s: could not open input file %s\n", selfie_name, source_name);
 
-          exit(EXITCODE_IOERROR);
+            exit(EXITCODE_IOERROR);
+          }
+
+          reset_scanner();
+          reset_parser();
+
+          compile_cstar();
+
+          printf4("%s: %d characters read in %d lines and %d comments\n", selfie_name,
+            (char*) number_of_read_characters,
+            (char*) line_number,
+            (char*) number_of_comments);
+
+          printf4("%s: with %d(%.2d%%) characters in %d actual symbols\n", selfie_name,
+            (char*) (number_of_read_characters - number_of_ignored_characters),
+            (char*) fixed_point_percentage(fixed_point_ratio(number_of_read_characters, number_of_read_characters - number_of_ignored_characters, 4), 4),
+            (char*) number_of_scanned_symbols);
+
+          printf4("%s: %d global variables, %d procedures, %d string literals\n", selfie_name,
+            (char*) number_of_global_variables,
+            (char*) number_of_procedures,
+            (char*) number_of_strings);
+
+          printf6("%s: %d calls, %d assignments, %d while, %d if, %d return\n", selfie_name,
+            (char*) number_of_calls,
+            (char*) number_of_assignments,
+            (char*) number_of_while,
+            (char*) number_of_if,
+            (char*) number_of_return);
+          }
         }
-
-        reset_scanner();
-        reset_parser();
-
-        compile_cstar();
-
-        printf4("%s: %d characters read in %d lines and %d comments\n", selfie_name,
-          (char*) number_of_read_characters,
-          (char*) line_number,
-          (char*) number_of_comments);
-
-        printf4("%s: with %d(%.2d%%) characters in %d actual symbols\n", selfie_name,
-          (char*) (number_of_read_characters - number_of_ignored_characters),
-          (char*) fixed_point_percentage(fixed_point_ratio(number_of_read_characters, number_of_read_characters - number_of_ignored_characters, 4), 4),
-          (char*) number_of_scanned_symbols);
-
-        printf4("%s: %d global variables, %d procedures, %d string literals\n", selfie_name,
-          (char*) number_of_global_variables,
-          (char*) number_of_procedures,
-          (char*) number_of_strings);
-
-        printf6("%s: %d calls, %d assignments, %d while, %d if, %d return\n", selfie_name,
-          (char*) number_of_calls,
-          (char*) number_of_assignments,
-          (char*) number_of_while,
-          (char*) number_of_if,
-          (char*) number_of_return);
       }
-    }
-  }
 
-  emit_bootstrapping();
+      emit_bootstrapping();
 
-  if (incremental == 0) {
-    if (number_of_source_files == 0)
-      printf1("%s: nothing to compile, only library generated\n", selfie_name);
+      if (incremental == 0) {
+        if (number_of_source_files == 0)
+            printf1("%s: nothing to compile, only library generated\n", selfie_name);
 
+        emit_data_segment();
 
-    emit_data_segment();
+        ELF_header = create_elf_header(binary_length, code_length);
 
-    ELF_header = create_elf_header(binary_length, code_length);
+        entry_point = ELF_ENTRY_POINT;
 
-    entry_point = ELF_ENTRY_POINT;
+        printf3("%s: symbol table search time was %d iterations on average and %d in total\n", selfie_name,
+          (char*) (total_search_time / number_of_searches),
+          (char*) total_search_time);
 
-    printf3("%s: symbol table search time was %d iterations on average and %d in total\n", selfie_name,
-      (char*) (total_search_time / number_of_searches),
-      (char*) total_search_time);
+        printf4("%s: %d bytes generated with %d instructions and %d bytes of data\n", selfie_name,
+          (char*) binary_length,
+          (char*) (code_length / INSTRUCTIONSIZE),
+          (char*) (binary_length - code_length));
 
-    printf4("%s: %d bytes generated with %d instructions and %d bytes of data\n", selfie_name,
-      (char*) binary_length,
-      (char*) (code_length / INSTRUCTIONSIZE),
-      (char*) (binary_length - code_length));
-
-    print_instruction_counters();
-  }
-  // in incremental mode: no need to emit data segment
-  // since this happens during compiling
+        print_instruction_counters();
+      }
+      // in incremental mode: no need to emit data segment
+      // since this happens during compiling
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -5791,7 +5799,7 @@ uint64_t load_data(uint64_t baddr) {
 }
 
 void store_data(uint64_t baddr, uint64_t data) {
-  if (baddr - code_length >= MAX_DATA_LENGTH) {
+  if (baddr >= MAX_CODE_LENGTH + MAX_DATA_LENGTH) {
     syntax_error_message("maximum data length exceeded");
 
     exit(EXITCODE_COMPILERERROR);
@@ -5939,7 +5947,7 @@ void emit_data_word(uint64_t data, uint64_t offset, uint64_t source_line_number)
   // assert: offset < 0
 
   if (incremental)
-    // data segment is ending at MAX_BINARY_LENGTH
+    // data segment is ending at MAX_BINARY_LENGTH // TODO make it working without changing MAX_BINARY_LENGTH
     store_data(MAX_BINARY_LENGTH + offset, data);
   else
     store_data(binary_length + offset, data);
@@ -6018,7 +6026,7 @@ uint64_t* create_elf_header(uint64_t binary_length, uint64_t code_length) {
                 + left_shift((uint64_t) 'L', 16)    // magic number part 2
                 + left_shift((uint64_t) 'F', 24)    // magic number part 3
                 + left_shift(2, 32)                 // file class is ELFCLASS64
-                + left_shift(1, 40)                 // object file data structures endianness is ELFDATA2LSB
+                + left_shift(1, 40)                 // object file data structures endianess is ELFDATA2LSB
                 + left_shift(1, 48);                // version of the object file format
   *(header + 1) = 0;                                // ABI version and start of padding bytes
   *(header + 2) = 2                                 // object file type is ET_EXEC
@@ -9806,7 +9814,7 @@ uint64_t handle_division_by_zero(uint64_t* context) {
     printf1("(assert %s); division by zero detected; check if this division by zero is reachable", path_condition);
     print("\n(check-sat)\n(get-model)\n(pop 1)\n");
 
-    // we terminate the execution of the context, because if the location is not reachable,
+    // we terminate the exeuction of the context, because if the location is not reachable,
     // the rest of the path is not reachable either, and otherwise
     // the execution would be terminated by this error anyway
     set_exit_code(context, EXITCODE_DIVISIONBYZERO);
@@ -9865,7 +9873,7 @@ uint64_t handle_exception(uint64_t* context) {
 
         set_exit_code(context, EXITCODE_SYMBOLICEXECUTIONERROR);
 
-        // we terminate the execution of the context, because if the location is not reachable,
+        // we terminate the exeuction of the context, because if the location is not reachable,
         // the rest of the path is not reachable either, and otherwise
         // the execution would be terminated by this error anyway
         return EXIT;
@@ -10238,7 +10246,11 @@ uint64_t selfie_run(uint64_t machine) {
 
   reset_interpreter();
   reset_profiler();
-  reset_microkernel();
+  if (incremental == 0) {
+    reset_microkernel();
+  }
+  // continue using the same context in incremental mode
+
 
   if (machine == DIPSTER) {
     debug          = 1;
@@ -10254,17 +10266,15 @@ uint64_t selfie_run(uint64_t machine) {
   }
 
   if (incremental)
-    init_memory(atoi(peek_argument(0)));
+    init_memory(VIRTUALMEMORYSIZE / MEGABYTE);
   else if (machine != MONSTER)
+    init_memory(atoi(peek_argument(0)));
   else {
     init_memory(1);
 
     max_execution_depth = atoi(peek_argument(0));
   }
 
-  if (incremental == 0) {
-  }
-  // continue using the same context in incremental mode
   boot_loader();
 
   printf3("%s: selfie executing %s with %dMB physical memory on ", selfie_name,
@@ -10302,7 +10312,7 @@ uint64_t selfie_run(uint64_t machine) {
       get_name(current_context),
       (char*) sign_extend(exit_code, SYSCALL_BITWIDTH));
 
-    print_profile();
+      print_profile();
   }
 
   symbolic = 0;
@@ -12701,17 +12711,23 @@ void selfie_increment() {
   input_buffer = smalloc((MAX_INPUT_LENGTH + 1) * SIZEOFUINT64);
 
   while (incremental) {
-    print(">> ");
-
-    read_user_input();
-
+    if (eval_expression) {
+      eval_expression = eval_expression - 1;
+    } else {
+      print(">> ");
+      
+      read_user_input();
+    }
+   
     syntax_error = 0;
+    single_procedure_call = 0;
     binary_length = binary_length_checkpoint;
-
+   
     reset_increment_file_cursor();
-
+   
     if (syntax_error == 0) {
-      if (is_valid_call()) {
+      if (is_valid_call()) {print("is_valid_call()\n");
+         
         if (report_undefined_procedures() == 0) {
           // save address to jump to for later
           code_length = binary_length;
@@ -12719,41 +12735,50 @@ void selfie_increment() {
           compile_call(procedure_name);
           // then emit the jump back directly to exit
           emit_jalr(REG_ZR, REG_ZR, entry_point_incremental + INSTRUCTIONSIZE);
-
+            
           if (syntax_error == 0) {
             // fix jal instruction / program counter for the interpreter
             store_instruction(entry_point_incremental, encode_j_format(code_length - entry_point_incremental, REG_RA, OP_JAL));
-
+               
             // emit new data [restore allocated memory]
             up_load_binary(current_context);
-
+               
             // run with new binary
             set_pc(current_context, entry_point_incremental);
-
+               
             mipster(current_context);
             *(get_regs(current_context) + REG_A0) = 0;
           }
         }
       } else if (compile_source()) {
-        if (syntax_error == 0) {
-          source_fd = open(string, O_RDONLY, 0);
-
-          if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
-            printf2("%s: could not open input file %s\n", selfie_name, string);
-          else {
-            printf1("compiling %s ...\n", string);
-
-            get_character();
-            get_symbol();
-
-            compile_cstar();
+          if (syntax_error == 0) {
+            source_fd = open(string, O_RDONLY, 0);
+            
+            if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
+              printf2("%s: could not open input file %s\n", selfie_name, string);
+            else {
+              printf1("compiling %s ...\n", string);
+               
+              get_character();
+              get_symbol();
+               
+              compile_cstar();
+            }
           }
-        }
-      } else {
-        reset_increment_file_cursor();
-
-        if (syntax_error == 0)
-          compile_cstar();
+        } else if (single_procedure_call + is_expression() == 1) {
+            printf1("compiling expression %s", input_buffer);
+            eval_expression = 2;	
+            
+            // embed the expression as return value in a function body
+            source_fd = open_write_only(INCREMENT_FILENAME);
+            write(source_fd, "uint64_t eval() { return ", string_length("uint64_t eval() { return "));
+            write(source_fd, input_buffer, string_length(input_buffer));
+            write(source_fd, ";}", string_length(";}"));           
+        } else {
+            reset_increment_file_cursor();
+         
+          if (syntax_error == 0)
+            compile_cstar();
       }
     }
   }
@@ -12821,6 +12846,27 @@ uint64_t is_valid_call() {
 
     if (symbol == SYM_LPARENTHESIS) {
       get_symbol();
+
+      while (symbol != SYM_RPARENTHESIS) {
+	// syntax error
+        if (symbol == SYM_EOF)
+          return 0;
+        get_symbol();
+      }
+      
+      get_symbol();
+      if (symbol == SYM_EOF)
+        single_procedure_call = 1;
+      else if (symbol == SYM_SEMICOLON)
+	single_procedure_call = 1;
+      else {
+        single_procedure_call = 0;
+	return 0;
+      }
+      // Go back to the position of the first function parameter
+      reset_increment_file_cursor();
+      get_symbol();
+      get_symbol();     
 
       procedure_entry = get_scoped_symbol_table_entry(procedure_name, PROCEDURE);
 
@@ -12915,6 +12961,7 @@ uint64_t selfie() {
         selfie_compile();
       else if (string_compare(option, "-i"))
         selfie_increment();
+
       else if (number_of_remaining_arguments() == 0) {
         // remaining options have at least one argument
         print_usage();

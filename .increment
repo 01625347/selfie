@@ -1,0 +1,2 @@
+uint64_t eval() { return a = 5;
+;}
