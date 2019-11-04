@@ -3680,7 +3680,7 @@ void print_type(uint64_t type) {
 }
 
 void type_warning(uint64_t expected, uint64_t found) {
-  if (incremental == 1)
+  if (eval_expression)
     return;
 
   print_line_number("warning", line_number);
@@ -12774,7 +12774,7 @@ void selfie_increment() {
             
             // embed the expression as return value in a function body
             source_fd = open_write_only(INCREMENT_FILENAME);
-            write(source_fd, "uint64_t eval() { return ", string_length("uint64_t eval() { return "));
+            write(source_fd, "uint64_t eval(){return ", string_length("uint64_t eval(){return "));
             write(source_fd, input_buffer, string_length(input_buffer));
             write(source_fd, ";}", string_length(";}"));           
         } else {
