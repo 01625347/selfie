@@ -512,6 +512,7 @@ uint64_t report_undefined_procedures();
 // |  5 | value   | VARIABLE: initial value
 // |  6 | address | VARIABLE, BIGINT, STRING: offset, PROCEDURE: address
 // |  7 | scope   | REG_GP, REG_FP
+// |  8 | chunks  | number of chunks of procedure
 // +----+---------+
 
 uint64_t* allocate_symbol_table_entry() {
@@ -526,6 +527,7 @@ uint64_t  get_type(uint64_t* entry)        { return             *(entry + 4); }
 uint64_t  get_value(uint64_t* entry)       { return             *(entry + 5); }
 uint64_t  get_address(uint64_t* entry)     { return             *(entry + 6); }
 uint64_t  get_scope(uint64_t* entry)       { return             *(entry + 7); }
+uint64_t  get_chunks(uint64_t* entry)      { return             *(entry + 8); }
 
 void set_next_entry(uint64_t* entry, uint64_t* next)   { *entry       = (uint64_t) next; }
 void set_string(uint64_t* entry, char* identifier)     { *(entry + 1) = (uint64_t) identifier; }
@@ -535,6 +537,7 @@ void set_type(uint64_t* entry, uint64_t type)          { *(entry + 4) = type; }
 void set_value(uint64_t* entry, uint64_t value)        { *(entry + 5) = value; }
 void set_address(uint64_t* entry, uint64_t address)    { *(entry + 6) = address; }
 void set_scope(uint64_t* entry, uint64_t scope)        { *(entry + 7) = scope; }
+void set_chunks(uint64_t* entry, uint64_t chunks)      { *(entry + 8) = chunks; }
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -927,10 +930,11 @@ void selfie_load();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-uint64_t MAX_BINARY_LENGTH = 262144; // 256KB = MAX_CODE_LENGTH + MAX_DATA_LENGTH
+uint64_t MAX_BINARY_LENGTH = 524288; // 512KB = MAX_CODE_LENGTH + MAX_DATA_LENGTH
 
-uint64_t MAX_CODE_LENGTH = 229376; // 224KB
+uint64_t MAX_CODE_LENGTH = 491520; // 480KB
 uint64_t MAX_DATA_LENGTH = 32768; // 32KB
+uint64_t MAX_CHUNK_LENGTH = 200;  // 200 Byte, must be multiple of INSTRUCTIONSIZE (4 Byte)
 
 // page-aligned ELF header for storing file header (64 bytes),
 // program header (56 bytes), and code length (8 bytes)
@@ -1301,6 +1305,7 @@ uint64_t BEQ_LIMIT                 = 35;  // limit of symbolic beq instructions 
 void init_interpreter();
 void reset_interpreter();
 void reset_profiler();
+void adapt_chunk();
 
 void     print_register_hexadecimal(uint64_t reg);
 void     print_register_octal(uint64_t reg);
@@ -1455,6 +1460,23 @@ void reset_profiler() {
 
   loads_per_instruction  = zalloc(code_length / INSTRUCTIONSIZE * SIZEOFUINT64);
   stores_per_instruction = zalloc(code_length / INSTRUCTIONSIZE * SIZEOFUINT64);
+}
+
+void adapt_chunk(uint64_t* entry) {
+  uint64_t procedure_length;
+
+  procedure_length = binary_length - get_address(entry);
+  //printf("Procedure <<%s>> with length: %lld\n", get_string(entry), procedure_length);
+  //printf("Binary length: %lld\n", binary_length);
+  //printf("Modulo: %lld\n", (procedure_length % MAX_CHUNK_LENGTH));
+  // increase binary length to a multiple of the fixed procedure length
+  if ((procedure_length % MAX_CHUNK_LENGTH) > 0)
+    binary_length = binary_length + (MAX_CHUNK_LENGTH - (procedure_length % MAX_CHUNK_LENGTH));
+
+  // change chunk size of procedure
+  //printf("Chunks: <%lld> with procedure <%s> size (%lld)\n", ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH), get_string(entry), procedure_length);
+  set_chunks(entry, ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH));
+
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4488,6 +4510,7 @@ void compile_if() {
             compile_statement();
 
           // if the "if" case was true we unconditionally jump here
+          //printf("Fixlink relative Compile IF\n");
           fixup_relative_JFormat(jump_forward_to_end, binary_length);
         } else
           // if the "if" case was not true we branch here
@@ -4885,9 +4908,11 @@ void compile_procedure(char* procedure, uint64_t type) {
       // procedure already called or declared or defined
       if (get_address(entry) != 0) {
         // procedure already called or defined
-        if (get_opcode(load_instruction(get_address(entry))) == OP_JAL)
+        if (get_opcode(load_instruction(get_address(entry))) == OP_JAL) {
           // procedure already called but not defined
+          //printf("Name procedure: %s\n", get_string(entry));
           fixlink_relative(get_address(entry), binary_length);
+        }
         else
           // procedure already defined
           is_undefined = 0;
@@ -4953,11 +4978,18 @@ void compile_procedure(char* procedure, uint64_t type) {
       exit_recoverable(EXITCODE_PARSERERROR);
     }
 
+    //printf("Fixlink Procedure Return\n");
     fixlink_relative(return_branches, binary_length);
 
     return_branches = 0;
 
     help_procedure_epilogue(number_of_parameters * REGISTERSIZE);
+
+    //interpreter
+    entry = search_global_symbol_table(procedure, PROCEDURE);
+
+    if (entry != (uint64_t*)0)
+      adapt_chunk(entry);
 
   } else
     syntax_error_unexpected();
@@ -5778,7 +5810,7 @@ uint64_t load_instruction(uint64_t baddr) {
 
 void store_instruction(uint64_t baddr, uint64_t instruction) {
   uint64_t temp;
-
+  //printf("baddr: %lld, maxCode: %lld allocated: %lld BinaryLength: %lld\n", baddr, MAX_BINARY_LENGTH, allocated_memory, binary_length);
   if (baddr >= MAX_CODE_LENGTH) {
     syntax_error_message("maximum code length exceeded");
 
@@ -5927,7 +5959,7 @@ void fixup_relative_JFormat(uint64_t from_address, uint64_t to_address) {
   uint64_t instruction;
 
   instruction = load_instruction(from_address);
-
+  //printf("From address (JFormat): %lld \n", from_address);
   store_instruction(from_address,
     encode_j_format(to_address - from_address,
       get_rd(instruction),
@@ -5936,10 +5968,10 @@ void fixup_relative_JFormat(uint64_t from_address, uint64_t to_address) {
 
 void fixlink_relative(uint64_t from_address, uint64_t to_address) {
   uint64_t previous_address;
-
+  //printf("Fixlink_relative Method\n");
   while (from_address != 0) {
     previous_address = get_immediate_j_format(load_instruction(from_address));
-
+    //printf("While Fixlink\n");
     fixup_relative_JFormat(from_address, to_address);
 
     from_address = previous_address;
