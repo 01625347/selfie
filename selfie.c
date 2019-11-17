@@ -1966,6 +1966,8 @@ void exit_recoverable(uint64_t code);
 
 uint64_t is_valid_call();
 uint64_t compile_source();
+uint64_t is_assignment();
+void reset_eval();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -1980,7 +1982,10 @@ char* INCREMENT_FILENAME = (char*) 0;
 // indicate if compiler is in incremental mode or not
 uint64_t incremental  = 0;
 uint64_t syntax_error = 0;
+
+// handle expression evaluation in incremental mode
 uint64_t eval_expression = 0;
+uint64_t binary_length_rollback = 0;
 uint64_t single_procedure_call = 0;
 
 // position where the jump to the called procedure will be generated
@@ -3702,7 +3707,7 @@ void print_type(uint64_t type) {
 }
 
 void type_warning(uint64_t expected, uint64_t found) {
-  if (incremental == 1)
+  if (eval_expression)
     return;
 
   print_line_number("warning", line_number);
@@ -12746,11 +12751,9 @@ void selfie_increment() {
   input_buffer = smalloc((MAX_INPUT_LENGTH + 1) * SIZEOFUINT64);
 
   while (incremental) {
-    if (eval_expression) {
-      eval_expression = eval_expression - 1;
-    } else {
-      print(">> ");
-      
+    if (eval_expression == 0) {
+      print(">> ");   
+   
       read_user_input();
     }
    
@@ -12784,6 +12787,11 @@ void selfie_increment() {
             mipster(current_context);
             *(get_regs(current_context) + REG_A0) = 0;
           }
+          if (eval_expression) {
+	    eval_expression = 0;
+	    binary_length_checkpoint = binary_length_rollback;
+	    reset_eval();
+          }
         }
       } else if (compile_source()) {
           if (syntax_error == 0) {
@@ -12802,13 +12810,23 @@ void selfie_increment() {
           }
         } else if (single_procedure_call + is_expression() == 1) {
             printf1("compiling expression %s", input_buffer);
-            eval_expression = 2;	
-            
-            // embed the expression as return value in a function body
-            source_fd = open_write_only(INCREMENT_FILENAME);
-            write(source_fd, "uint64_t eval() { return ", string_length("uint64_t eval() { return "));
-            write(source_fd, input_buffer, string_length(input_buffer));
-            write(source_fd, ";}", string_length(";}"));           
+            eval_expression = 1;
+	    binary_length_rollback = binary_length;
+
+	    // embed the expression in a function body
+	    if (is_assignment()) {
+	      // without return value (default return 0)
+              source_fd = open_write_only(INCREMENT_FILENAME);
+              write(source_fd, "uint64_t eval(){", string_length("uint64_t eval(){"));
+              write(source_fd, input_buffer, string_length(input_buffer));
+              write(source_fd, ";}", string_length(";}")); 
+            } else {
+              // with return value
+              source_fd = open_write_only(INCREMENT_FILENAME);
+              write(source_fd, "uint64_t eval(){return ", string_length("uint64_t eval(){return "));
+              write(source_fd, input_buffer, string_length(input_buffer));
+              write(source_fd, ";}", string_length(";}"));
+            }           
         } else {
             reset_increment_file_cursor();
          
@@ -12936,6 +12954,25 @@ uint64_t compile_source() {
 
   return 0;
 }
+
+uint64_t is_assignment() {
+  reset_increment_file_cursor();
+
+  while (symbol != SYM_EOF) {
+    // Assignment
+    if (symbol == SYM_ASSIGN)
+      return 1;
+    get_symbol();
+   }
+   return 0;
+}
+
+void reset_eval() {
+  uint64_t* entry;
+  entry = search_global_symbol_table(string_copy("eval"), PROCEDURE);
+  set_address(entry, 0);  
+}
+
 
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
