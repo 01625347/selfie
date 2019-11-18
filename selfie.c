@@ -1469,7 +1469,7 @@ void adapt_chunk(uint64_t* entry) {
   procedure_length = binary_length - get_address(entry);
   actual_binary_length = binary_length;
   
-  ///printf("Procedure <<%s>> with length: <<%lld>>\n", get_string(entry), procedure_length);
+  printf("Procedure <<%s>> with length: <<%lld>>\n", get_string(entry), procedure_length);
   //printf("Binary length: %lld\n", binary_length);
   //printf("Modulo: %lld\n", (procedure_length % MAX_CHUNK_LENGTH));
   // increase binary length to a multiple of the fixed procedure length
@@ -1478,7 +1478,7 @@ void adapt_chunk(uint64_t* entry) {
       emit_nop(); // write NOP to rest of chunk
 
   // change chunk size of procedure
-  //printf("Chunks: <%lld> with procedure <%s> size (%lld)\n", ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH), get_string(entry), (binary_length-actual_binary_length+procedure_length));
+  printf("Chunks: <%lld> with procedure <%s> size (%lld)\n", ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH), get_string(entry), (binary_length-actual_binary_length+procedure_length));
   set_chunks(entry, ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH));
 
 }
@@ -4848,8 +4848,8 @@ void compile_procedure(char* procedure, uint64_t type) {
   uint64_t number_of_parameters;
   uint64_t parameters;
   uint64_t number_of_local_variable_bytes;
-  uint64_t* entry;
-
+  uint64_t* entry;  
+  printf("TEST: %s \n",procedure);
   // assuming procedure is undefined
   is_undefined = 1;
 
@@ -4946,8 +4946,11 @@ void compile_procedure(char* procedure, uint64_t type) {
         }
       } else {
         // procedure already defined
-        print_line_number("warning", line_number);
-        printf1("redefinition of procedure %s ignored\n", procedure);
+        if (incremental == 0) {
+          print_line_number("warning", line_number);
+          printf1("redefinition of procedure %s ignored\n", procedure);
+          printf("BinaryLength Redefinition: %lld \n", binary_length);
+        }
       }
     }
 
@@ -4995,14 +4998,16 @@ void compile_procedure(char* procedure, uint64_t type) {
     help_procedure_epilogue(number_of_parameters * REGISTERSIZE);
 
     //interpreter
-    entry = search_global_symbol_table(procedure, PROCEDURE);
+    if (is_undefined) {
+      entry = search_global_symbol_table(procedure, PROCEDURE);
 
-    if (entry != (uint64_t*)0)
-      adapt_chunk(entry);
+      if (entry != (uint64_t*)0)
+        adapt_chunk(entry);
+    }
 
   } else
     syntax_error_unexpected();
-
+  printf("BinaryLength Redefinition after: %lld \n", binary_length);
   local_symbol_table = (uint64_t*) 0;
 
   // assert: allocated_temporaries == 0

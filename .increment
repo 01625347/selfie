@@ -1,1 +1,1 @@
--c "selfie.c"
+uint64_t test(int a, int b) {return 2;}
