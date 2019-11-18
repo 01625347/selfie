@@ -1,10 +1,12 @@
 import os
 import re
 import sys
+from pathlib import Path
 from subprocess import run
 
 from lib.grade import grade
-from lib.print import (enter_quiet_mode, leave_quiet_mode, print_error,
+from lib.runner import set_home_path, set_assignment_name
+from lib.print import (is_in_quiet_mode, enter_quiet_mode, leave_quiet_mode, print_error,
                        print_message, print_usage)
 
 DEFAULT_BULK_GRADE_DIRECTORY = os.path.abspath('./.repositories')
@@ -12,7 +14,6 @@ DEFAULT_BULK_GRADE_DIRECTORY = os.path.abspath('./.repositories')
 bulk_grade_mode = False
 file_with_commit_links = None
 bulk_grade_directory = DEFAULT_BULK_GRADE_DIRECTORY
-assignment_path = ''
 
 
 def error(msg):
@@ -63,23 +64,21 @@ def parse_assignment(args, assignments):
 
 
 def validate_options_for(assignment):
-    if bulk_grade_mode and assignment == '':
-        error('please specify a test used for bulk grading')
+    if not bulk_grade_mode and is_in_quiet_mode() and assignment is None:
+        error('please specify a assignment')
 
 
 def check_assignment(assignment, base_test):
-    global assignment_path
-
     if assignment[3] != base_test:
         base_test(mandatory=True)
 
-    assignment_path = assignment[2]
+    set_assignment_name(assignment[2])
 
     print_message('executing test \'{}\''.format(assignment[0]))
 
     assignment[3]()
 
-    assignment_path = ''
+    set_assignment_name('')
 
     grade()
 
@@ -118,8 +117,6 @@ def parse_commit_url(url):
 
 
 def do_bulk_grading(assignment, base_test):
-    enter_quiet_mode()
-
     if not os.path.exists(bulk_grade_directory):
         os.mkdir(bulk_grade_directory)
 
@@ -162,8 +159,12 @@ def do_bulk_grading(assignment, base_test):
                 'git checkout -q {} >/dev/null 2>&1'.format(info['commit']))
 
             if status == 0:
-                check_assignment(assignment, base_test)
-                print_message('')
+                if assignment is None:
+                    print_message('updated', loud=True)
+                else:
+                    print_message('')
+                    check_assignment(assignment, base_test)
+                    print_message('', loud=True)
             else:
                 print_message(
                     'commit hash "{}" is not valid'.format(info['commit']))
@@ -196,13 +197,13 @@ option_flags = [
 
 def reset_state():
     global bulk_grade_mode, bulk_grade_directory
-    global file_with_commit_links, assignment_path
+    global file_with_commit_links
     global print_usage_flag
 
     bulk_grade_mode = False
     file_with_commit_links = None
     bulk_grade_directory = DEFAULT_BULK_GRADE_DIRECTORY
-    assignment_path = ''
+    set_assignment_name('')
     print_usage_flag = False
 
     leave_quiet_mode()
@@ -213,6 +214,8 @@ def process_arguments(argv, assignments):
         if len(argv) <= 1:
             print_usage(option_flags, assignments)
             exit()
+
+        set_home_path(Path(os.path.abspath(os.path.dirname(argv[0]))))
 
         args = parse_options(argv[1:], option_flags)
 
