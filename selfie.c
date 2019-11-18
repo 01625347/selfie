@@ -5110,7 +5110,7 @@ void compile_cstar() {
       if (eval_expression) {
 	// trigger call of eval-function
 	source_fd = open_write_only(INCREMENT_FILENAME);
-	write(source_fd, "eval()", string_length("eval()"));
+	write(source_fd, (uint64_t*)"eval()", string_length("eval()"));
       }
     }
   }
@@ -12792,9 +12792,9 @@ void selfie_increment() {
             *(get_regs(current_context) + REG_A0) = 0;
           }
           if (eval_expression) {
-	    eval_expression = 0;
-	    binary_length_checkpoint = binary_length_rollback;
-	    reset_eval();
+            eval_expression = 0;
+            binary_length_checkpoint = binary_length_rollback;
+            reset_eval();
           }
         }
       } else if (compile_source()) {
@@ -12813,24 +12813,24 @@ void selfie_increment() {
             }
           }
         } else if (single_procedure_call + is_expression() == 1) {
-            printf1("compiling expression %s", input_buffer);
-            eval_expression = 1;
-	    binary_length_rollback = binary_length;
+          printf1("compiling expression %s", (char*)input_buffer);
+          eval_expression = 1;
+          binary_length_rollback = binary_length;
 
-	    // embed the expression in a function body
-	    if (is_assignment()) {
-	      // without return value (default return 0)
-              source_fd = open_write_only(INCREMENT_FILENAME);
-              write(source_fd, "uint64_t eval(){", string_length("uint64_t eval(){"));
-              write(source_fd, input_buffer, string_length(input_buffer));
-              write(source_fd, ";}", string_length(";}")); 
-            } else {
-              // with return value
-              source_fd = open_write_only(INCREMENT_FILENAME);
-              write(source_fd, "uint64_t eval(){return ", string_length("uint64_t eval(){return "));
-              write(source_fd, input_buffer, string_length(input_buffer));
-              write(source_fd, ";}", string_length(";}"));
-            }           
+          // embed the expression in a function body
+          if (is_assignment()) {
+            // without return value (default return 0)
+            source_fd = open_write_only(INCREMENT_FILENAME);
+            write(source_fd, (uint64_t*)"uint64_t eval(){", string_length("uint64_t eval(){"));
+            write(source_fd, input_buffer, string_length((char*)input_buffer));
+            write(source_fd, (uint64_t*)";}", string_length(";}")); 
+          } else {
+            // with return value
+            source_fd = open_write_only(INCREMENT_FILENAME);
+            write(source_fd, (uint64_t*)"uint64_t eval(){return ", string_length("uint64_t eval(){return "));
+            write(source_fd, input_buffer, string_length((char*)input_buffer));
+            write(source_fd, (uint64_t*)";}", string_length(";}"));
+          }           
         } else {
             reset_increment_file_cursor();
          
@@ -12854,7 +12854,7 @@ void read_user_input() {
     exit(EXITCODE_IOERROR);
 
   } else if (number_of_read_bytes > 0) {
-    store_character(input_buffer, number_of_read_bytes, 0);
+    store_character((char*)input_buffer, number_of_read_bytes, 0);
 
     source_fd = open_write_only(INCREMENT_FILENAME);
 
@@ -12864,7 +12864,7 @@ void read_user_input() {
       exit(EXITCODE_IOERROR);
     }
 
-    if (write(source_fd, input_buffer, string_length(input_buffer)) != string_length(input_buffer)) {
+    if (write(source_fd, input_buffer, string_length((char*)input_buffer)) != string_length((char*)input_buffer)) {
       printf2("%s: could not write to %s\n", selfie_name, INCREMENT_FILENAME);
 
       exit(EXITCODE_IOERROR);

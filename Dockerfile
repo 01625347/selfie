@@ -160,10 +160,10 @@ COPY --from=qemubuilder $RISCV/ $RISCV/
 COPY --from=boolectorbuilder $RISCV/ $RISCV/
 
 # add selfie sources to the image
-COPY . /opt/selfie/
+COPY . /opt/sws2019/
 
 # specify user work directory
-WORKDIR /opt/selfie
+WORKDIR /opt/sws2019
 
 # build selfie
 RUN make selfie
