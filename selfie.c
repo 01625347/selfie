@@ -1464,17 +1464,21 @@ void reset_profiler() {
 
 void adapt_chunk(uint64_t* entry) {
   uint64_t procedure_length;
+  uint64_t actual_binary_length;
 
   procedure_length = binary_length - get_address(entry);
-  //printf("Procedure <<%s>> with length: %lld\n", get_string(entry), procedure_length);
+  actual_binary_length = binary_length;
+  
+  ///printf("Procedure <<%s>> with length: <<%lld>>\n", get_string(entry), procedure_length);
   //printf("Binary length: %lld\n", binary_length);
   //printf("Modulo: %lld\n", (procedure_length % MAX_CHUNK_LENGTH));
   // increase binary length to a multiple of the fixed procedure length
   if ((procedure_length % MAX_CHUNK_LENGTH) > 0)
-    binary_length = binary_length + (MAX_CHUNK_LENGTH - (procedure_length % MAX_CHUNK_LENGTH));
+    while (binary_length < actual_binary_length + (MAX_CHUNK_LENGTH - (procedure_length % MAX_CHUNK_LENGTH)))
+      emit_nop(); // write NOP to rest of chunk
 
   // change chunk size of procedure
-  //printf("Chunks: <%lld> with procedure <%s> size (%lld)\n", ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH), get_string(entry), procedure_length);
+  //printf("Chunks: <%lld> with procedure <%s> size (%lld)\n", ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH), get_string(entry), (binary_length-actual_binary_length+procedure_length));
   set_chunks(entry, ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH));
 
 }
