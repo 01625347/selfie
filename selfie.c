@@ -12796,7 +12796,7 @@ void selfie_increment() {
    
     if (syntax_error == 0) {
       if (is_valid_call()) {
-        printf("valid call\n");
+        //printf("valid call\n");
         if (report_undefined_procedures() == 0) {
           // save address to jump to for later
           code_length = binary_length;
@@ -12825,7 +12825,7 @@ void selfie_increment() {
           }
         }
       } else if (compile_source()) {
-        printf("source\n");
+        //printf("source\n");
           if (syntax_error == 0) {
             source_fd = open(string, O_RDONLY, 0);
             
@@ -12861,7 +12861,7 @@ void selfie_increment() {
         }           
       } else {
         reset_increment_file_cursor();
-        printf("Compile Method\n");
+        //printf("Compile Method\n");
         if (syntax_error == 0)
           compile_cstar();
       }
