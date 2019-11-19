@@ -4849,13 +4849,13 @@ void compile_procedure(char* procedure, uint64_t type) {
   uint64_t parameters;
   uint64_t number_of_local_variable_bytes;
   uint64_t* entry;
-  uint64_t checkpoint_binary_length;
+  uint64_t checkpoint_begin_procedure;
+  uint64_t checkpoint_end_procedure;
   
   // assuming procedure is undefined
   is_undefined = 1;
 
-  // set checkpoint of binary_length
-  checkpoint_binary_length = binary_length;
+  checkpoint_begin_procedure = binary_length;
 
   number_of_parameters = 0;
 
@@ -4948,15 +4948,10 @@ void compile_procedure(char* procedure, uint64_t type) {
           number_of_calls = number_of_calls + 1;
         }
       } else {
-        // procedure already defined        
+        // procedure already defined
+        print_line_number("warning", line_number);      
         if (incremental == 0) {
-          print_line_number("warning", line_number);
           printf1("redefinition of procedure %s ignored\n", procedure);
-        }
-        if (overwrite_procedure == 1) {// set binary_length to begin of original procedure
-          binary_length = get_address(entry);
-          print_line_number("warning", line_number);
-          printf2("redefinition of procedure %s overwrites original procedure %s\n", procedure, procedure);
         }
       }
     }
@@ -5003,35 +4998,35 @@ void compile_procedure(char* procedure, uint64_t type) {
 
     help_procedure_epilogue(number_of_parameters * REGISTERSIZE);
 
-    // set procedure length to multiple of chunk if procedure definition
-    if (is_undefined) {
-      entry = search_global_symbol_table(procedure, PROCEDURE);
-
-      if (entry != (uint64_t*) 0)
-        adapt_chunks(entry, (binary_length - checkpoint_binary_length), 0);
-    } else {  // overwrite procedure by copying code to original procedure 
+    // make jump to new method
+    if (is_undefined == 0) {
       if (incremental) {
-        // check if new method is less or equal the original method size in first loop
-        if (overwrite_procedure == 0) {
-          if ((binary_length - checkpoint_binary_length) <= (get_chunks(entry) * MAX_CHUNK_LENGTH)) {
-            if (string_compare(procedure, "main"))
-              overwrite_procedure = 0;  // set to 0 not to overwrite first main
-            else
-              overwrite_procedure = 1;  // set to 1 that compile procedure once more (loop in selfie_increment)
-          } else {
-            binary_length  = checkpoint_binary_length;  // skip compiled procedure
-            overwrite_procedure = 0;
-            printf1("redefinition of procedure %s ignored because too less space\n", procedure);
-          } // instruction written to original procedure chunks. Fill rest of chunks with NOP
-        } else if (overwrite_procedure == 1) {
-          adapt_chunks(entry, 0, get_chunks(entry));
+        if (string_compare(procedure, "main"))
+          printf1("redefinition of procedure %s ignored\n", procedure);
+        else {
+          checkpoint_end_procedure = binary_length;
+          binary_length = get_address(entry);
+
+          // allocate memory for return address
+          emit_addi(REG_SP, REG_SP, -REGISTERSIZE);
+          // save return address
+          emit_sd(REG_SP, 0, REG_RA);
+          // write jump to new procedure
+          emit_jal(REG_RA, checkpoint_begin_procedure - get_address(entry));
+          // deallocate memory for caller's frame pointer
+          emit_addi(REG_SP, REG_SP, REGISTERSIZE);
+          // restore return address
+          emit_ld(REG_RA, REG_SP, 0);
+          // return
+          emit_jalr(REG_ZR, REG_RA, 0);
+
+          printf2("redefinition of procedure %s will overwrite %s\n", procedure, procedure);
+          
           // restore binary_length
-          binary_length = checkpoint_binary_length;
-          overwrite_procedure = 0;
+          binary_length = checkpoint_end_procedure;
         }
       }
-    }
-    
+    }    
 
   } else
     syntax_error_unexpected();
