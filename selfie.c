@@ -934,7 +934,7 @@ uint64_t MAX_BINARY_LENGTH = 524288; // 512KB = MAX_CODE_LENGTH + MAX_DATA_LENGT
 
 uint64_t MAX_CODE_LENGTH = 491520; // 480KB
 uint64_t MAX_DATA_LENGTH = 32768; // 32KB
-uint64_t MAX_CHUNK_LENGTH = 200;  // 200 Byte, must be multiple of INSTRUCTIONSIZE (4 Byte)
+uint64_t MAX_CHUNK_LENGTH = 1;  // 200 Byte, must be multiple of INSTRUCTIONSIZE (4 Byte)
 
 // page-aligned ELF header for storing file header (64 bytes),
 // program header (56 bytes), and code length (8 bytes)
@@ -1305,7 +1305,7 @@ uint64_t BEQ_LIMIT                 = 35;  // limit of symbolic beq instructions 
 void init_interpreter();
 void reset_interpreter();
 void reset_profiler();
-void adapt_chunk();
+void adapt_chunks();
 
 void     print_register_hexadecimal(uint64_t reg);
 void     print_register_octal(uint64_t reg);
@@ -1462,24 +1462,24 @@ void reset_profiler() {
   stores_per_instruction = zalloc(code_length / INSTRUCTIONSIZE * SIZEOFUINT64);
 }
 
-void adapt_chunk(uint64_t* entry) {
-  uint64_t procedure_length;
+void adapt_chunks(uint64_t* entry, uint64_t procedure_length, uint64_t chunks) {
   uint64_t actual_binary_length;
 
-  procedure_length = binary_length - get_address(entry);
   actual_binary_length = binary_length;
   
-  printf("Procedure <<%s>> with length: <<%lld>>\n", get_string(entry), procedure_length);
-  //printf("Binary length: %lld\n", binary_length);
-  //printf("Modulo: %lld\n", (procedure_length % MAX_CHUNK_LENGTH));
   // increase binary length to a multiple of the fixed procedure length
-  if ((procedure_length % MAX_CHUNK_LENGTH) > 0)
-    while (binary_length < actual_binary_length + (MAX_CHUNK_LENGTH - (procedure_length % MAX_CHUNK_LENGTH)))
-      emit_nop(); // write NOP to rest of chunk
+  if (chunks == 0) { // fillup to next chunk size
+    if ((procedure_length % MAX_CHUNK_LENGTH) > 0)
+      while (binary_length < actual_binary_length + (MAX_CHUNK_LENGTH - (procedure_length % MAX_CHUNK_LENGTH)))
+        emit_nop(); // write NOP to rest of chunk
+  } else {  // fill up to fixed chunk size
+    while (binary_length < (get_address(entry) + (MAX_CHUNK_LENGTH * chunks)))
+        emit_nop(); // write NOP to rest of chunk
+  }
 
   // change chunk size of procedure
-  printf("Chunks: <%lld> with procedure <%s> size (%lld)\n", ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH), get_string(entry), (binary_length-actual_binary_length+procedure_length));
-  set_chunks(entry, ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH));
+  if (chunks == 0)
+    set_chunks(entry, ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH));
 
 }
 
@@ -1989,6 +1989,7 @@ uint64_t syntax_error = 0;
 
 // handle expression evaluation in incremental mode
 uint64_t eval_expression = 0;
+uint64_t overwrite_procedure = 0;
 uint64_t binary_length_rollback = 0;
 uint64_t single_procedure_call = 0;
 
@@ -4519,7 +4520,6 @@ void compile_if() {
             compile_statement();
 
           // if the "if" case was true we unconditionally jump here
-          //printf("Fixlink relative Compile IF\n");
           fixup_relative_JFormat(jump_forward_to_end, binary_length);
         } else
           // if the "if" case was not true we branch here
@@ -4848,10 +4848,14 @@ void compile_procedure(char* procedure, uint64_t type) {
   uint64_t number_of_parameters;
   uint64_t parameters;
   uint64_t number_of_local_variable_bytes;
-  uint64_t* entry;  
-  printf("TEST: %s \n",procedure);
+  uint64_t* entry;
+  uint64_t checkpoint_binary_length;
+  
   // assuming procedure is undefined
   is_undefined = 1;
+
+  // set checkpoint of binary_length
+  checkpoint_binary_length = binary_length;
 
   number_of_parameters = 0;
 
@@ -4919,7 +4923,6 @@ void compile_procedure(char* procedure, uint64_t type) {
         // procedure already called or defined
         if (get_opcode(load_instruction(get_address(entry))) == OP_JAL) {
           // procedure already called but not defined
-          //printf("Name procedure: %s\n", get_string(entry));
           fixlink_relative(get_address(entry), binary_length);
         }
         else
@@ -4945,11 +4948,15 @@ void compile_procedure(char* procedure, uint64_t type) {
           number_of_calls = number_of_calls + 1;
         }
       } else {
-        // procedure already defined
+        // procedure already defined        
         if (incremental == 0) {
           print_line_number("warning", line_number);
           printf1("redefinition of procedure %s ignored\n", procedure);
-          printf("BinaryLength Redefinition: %lld \n", binary_length);
+        }
+        if (overwrite_procedure == 1) {// set binary_length to begin of original procedure
+          binary_length = get_address(entry);
+          print_line_number("warning", line_number);
+          printf2("redefinition of procedure %s overwrites original procedure %s\n", procedure, procedure);
         }
       }
     }
@@ -4990,24 +4997,45 @@ void compile_procedure(char* procedure, uint64_t type) {
       exit_recoverable(EXITCODE_PARSERERROR);
     }
 
-    //printf("Fixlink Procedure Return\n");
     fixlink_relative(return_branches, binary_length);
 
     return_branches = 0;
 
     help_procedure_epilogue(number_of_parameters * REGISTERSIZE);
 
-    //interpreter
+    // set procedure length to multiple of chunk if procedure definition
     if (is_undefined) {
       entry = search_global_symbol_table(procedure, PROCEDURE);
 
-      if (entry != (uint64_t*)0)
-        adapt_chunk(entry);
+      if (entry != (uint64_t*) 0)
+        adapt_chunks(entry, (binary_length - checkpoint_binary_length), 0);
+    } else {  // overwrite procedure by copying code to original procedure 
+      if (incremental) {
+        // check if new method is less or equal the original method size in first loop
+        if (overwrite_procedure == 0) {
+          if ((binary_length - checkpoint_binary_length) <= (get_chunks(entry) * MAX_CHUNK_LENGTH)) {
+            if (string_compare(procedure, "main"))
+              overwrite_procedure = 0;  // set to 0 not to overwrite first main
+            else
+              overwrite_procedure = 1;  // set to 1 that compile procedure once more (loop in selfie_increment)
+          } else {
+            binary_length  = checkpoint_binary_length;  // skip compiled procedure
+            overwrite_procedure = 0;
+            printf1("redefinition of procedure %s ignored because too less space\n", procedure);
+          } // instruction written to original procedure chunks. Fill rest of chunks with NOP
+        } else if (overwrite_procedure == 1) {
+          adapt_chunks(entry, 0, get_chunks(entry));
+          // restore binary_length
+          binary_length = checkpoint_binary_length;
+          overwrite_procedure = 0;
+        }
+      }
     }
+    
 
   } else
     syntax_error_unexpected();
-  printf("BinaryLength Redefinition after: %lld \n", binary_length);
+  
   local_symbol_table = (uint64_t*) 0;
 
   // assert: allocated_temporaries == 0
@@ -5101,7 +5129,7 @@ void compile_cstar() {
 
           allocated_memory = allocated_memory - REGISTERSIZE;
         }
-	eval_expression = 0;
+        eval_expression = 0;
         syntax_error = 0;
         // undo last code generation by resetting binary_length
         binary_length = binary_length_checkpoint;
@@ -5113,9 +5141,9 @@ void compile_cstar() {
       latest_hashed_entry_address = (uint64_t*) 0;
       
       if (eval_expression) {
-	// trigger call of eval-function
-	source_fd = open_write_only(INCREMENT_FILENAME);
-	write(source_fd, (uint64_t*)"eval()", string_length("eval()"));
+      // trigger call of eval-function
+      source_fd = open_write_only(INCREMENT_FILENAME);
+      write(source_fd, (uint64_t*)"eval()", string_length("eval()"));
       }
     }
   }
@@ -5824,7 +5852,7 @@ uint64_t load_instruction(uint64_t baddr) {
 
 void store_instruction(uint64_t baddr, uint64_t instruction) {
   uint64_t temp;
-  //printf("baddr: %lld, maxCode: %lld allocated: %lld BinaryLength: %lld\n", baddr, MAX_BINARY_LENGTH, allocated_memory, binary_length);
+  
   if (baddr >= MAX_CODE_LENGTH) {
     syntax_error_message("maximum code length exceeded");
 
@@ -5973,7 +6001,7 @@ void fixup_relative_JFormat(uint64_t from_address, uint64_t to_address) {
   uint64_t instruction;
 
   instruction = load_instruction(from_address);
-  //printf("From address (JFormat): %lld \n", from_address);
+  
   store_instruction(from_address,
     encode_j_format(to_address - from_address,
       get_rd(instruction),
@@ -5982,10 +6010,10 @@ void fixup_relative_JFormat(uint64_t from_address, uint64_t to_address) {
 
 void fixlink_relative(uint64_t from_address, uint64_t to_address) {
   uint64_t previous_address;
-  //printf("Fixlink_relative Method\n");
+  
   while (from_address != 0) {
     previous_address = get_immediate_j_format(load_instruction(from_address));
-    //printf("While Fixlink\n");
+    
     fixup_relative_JFormat(from_address, to_address);
 
     from_address = previous_address;
@@ -12760,10 +12788,12 @@ void selfie_increment() {
   input_buffer = smalloc((MAX_INPUT_LENGTH + 1) * SIZEOFUINT64);
 
   while (incremental) {
+    // skip read input if evaluation expression or overwriting procedure
     if (eval_expression == 0) {
-      print(">> ");   
-   
-      read_user_input();
+      if (overwrite_procedure == 0) {
+        print(">> ");   
+        read_user_input();
+      }
     }
    
     syntax_error = 0;
@@ -12809,7 +12839,8 @@ void selfie_increment() {
             if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
               printf2("%s: could not open input file %s\n", selfie_name, string);
             else {
-              printf1("compiling %s ...\n", string);
+              if (overwrite_procedure == 0)
+                printf1("compiling %s ...\n", string);
                
               get_character();
               get_symbol();
@@ -12817,30 +12848,30 @@ void selfie_increment() {
               compile_cstar();
             }
           }
-        } else if (single_procedure_call + is_expression() == 1) {
-          printf1("compiling expression %s", (char*)input_buffer);
-          eval_expression = 1;
-          binary_length_rollback = binary_length;
+      } else if (single_procedure_call + is_expression() == 1) {
+        printf1("compiling expression %s", (char*)input_buffer);
+        eval_expression = 1;
+        binary_length_rollback = binary_length;
 
-          // embed the expression in a function body
-          if (is_assignment()) {
-            // without return value (default return 0)
-            source_fd = open_write_only(INCREMENT_FILENAME);
-            write(source_fd, (uint64_t*)"uint64_t eval(){", string_length("uint64_t eval(){"));
-            write(source_fd, input_buffer, string_length((char*)input_buffer));
-            write(source_fd, (uint64_t*)";}", string_length(";}")); 
-          } else {
-            // with return value
-            source_fd = open_write_only(INCREMENT_FILENAME);
-            write(source_fd, (uint64_t*)"uint64_t eval(){return ", string_length("uint64_t eval(){return "));
-            write(source_fd, input_buffer, string_length((char*)input_buffer));
-            write(source_fd, (uint64_t*)";}", string_length(";}"));
-          }           
+        // embed the expression in a function body
+        if (is_assignment()) {
+          // without return value (default return 0)
+          source_fd = open_write_only(INCREMENT_FILENAME);
+          write(source_fd, (uint64_t*)"uint64_t eval(){", string_length("uint64_t eval(){"));
+          write(source_fd, input_buffer, string_length((char*)input_buffer));
+          write(source_fd, (uint64_t*)"}", string_length("}")); 
         } else {
-            reset_increment_file_cursor();
-         
-          if (syntax_error == 0)
-            compile_cstar();
+          // with return value
+          source_fd = open_write_only(INCREMENT_FILENAME);
+          write(source_fd, (uint64_t*)"uint64_t eval(){return ", string_length("uint64_t eval(){return "));
+          write(source_fd, input_buffer, string_length((char*)input_buffer));
+          write(source_fd, (uint64_t*)"}", string_length("}"));
+        }           
+      } else {
+        reset_increment_file_cursor();
+        
+        if (syntax_error == 0)
+          compile_cstar();
       }
     }
   }

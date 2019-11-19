@@ -11,6 +11,16 @@ void println();
 uint64_t left_shift(uint64_t n, uint64_t b);
 uint64_t right_shift(uint64_t n, uint64_t b);
 
+uint64_t overwrite(uint64_t a, uint64_t b) {
+    return a + b;
+}
+
+uint64_t overwrite(uint64_t a, uint64_t b) {
+    uint64_t c;
+    c = 2*a;
+    return c + b;
+}
+
 uint64_t main() {
   uint64_t i;
   uint64_t j;
