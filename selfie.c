@@ -1989,7 +1989,6 @@ uint64_t syntax_error = 0;
 
 // handle expression evaluation in incremental mode
 uint64_t eval_expression = 0;
-uint64_t overwrite_procedure = 0;
 uint64_t binary_length_rollback = 0;
 uint64_t single_procedure_call = 0;
 
@@ -12785,10 +12784,8 @@ void selfie_increment() {
   while (incremental) {
     // skip read input if evaluation expression or overwriting procedure
     if (eval_expression == 0) {
-      if (overwrite_procedure == 0) {
-        print(">> ");   
-        read_user_input();
-      }
+      print(">> ");   
+      read_user_input();
     }
    
     syntax_error = 0;
@@ -12799,7 +12796,7 @@ void selfie_increment() {
    
     if (syntax_error == 0) {
       if (is_valid_call()) {
-         
+        printf("valid call\n");
         if (report_undefined_procedures() == 0) {
           // save address to jump to for later
           code_length = binary_length;
@@ -12828,14 +12825,14 @@ void selfie_increment() {
           }
         }
       } else if (compile_source()) {
+        printf("source\n");
           if (syntax_error == 0) {
             source_fd = open(string, O_RDONLY, 0);
             
             if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
               printf2("%s: could not open input file %s\n", selfie_name, string);
             else {
-              if (overwrite_procedure == 0)
-                printf1("compiling %s ...\n", string);
+              printf1("compiling %s ...\n", string);
                
               get_character();
               get_symbol();
@@ -12864,7 +12861,7 @@ void selfie_increment() {
         }           
       } else {
         reset_increment_file_cursor();
-        
+        printf("Compile Method\n");
         if (syntax_error == 0)
           compile_cstar();
       }
