@@ -41,6 +41,7 @@ jobs:
       services: docker
       os: linux
       script:
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
         - docker run 01625347/sws2019 make assemble
         - docker run 01625347/sws2019 make spike
         - docker run 01625347/sws2019 make qemu
@@ -50,4 +51,3 @@ jobs:
 notifications:
   email: false
   slack: unisalzburg:QvIGytsSaOqBt81UQrQ6ObLe
-  
