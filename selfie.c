@@ -512,7 +512,6 @@ uint64_t report_undefined_procedures();
 // |  5 | value   | VARIABLE: initial value
 // |  6 | address | VARIABLE, BIGINT, STRING: offset, PROCEDURE: address
 // |  7 | scope   | REG_GP, REG_FP
-// |  8 | chunks  | number of chunks of procedure
 // +----+---------+
 
 uint64_t* allocate_symbol_table_entry() {
@@ -527,7 +526,6 @@ uint64_t  get_type(uint64_t* entry)        { return             *(entry + 4); }
 uint64_t  get_value(uint64_t* entry)       { return             *(entry + 5); }
 uint64_t  get_address(uint64_t* entry)     { return             *(entry + 6); }
 uint64_t  get_scope(uint64_t* entry)       { return             *(entry + 7); }
-uint64_t  get_chunks(uint64_t* entry)      { return             *(entry + 8); }
 
 void set_next_entry(uint64_t* entry, uint64_t* next)   { *entry       = (uint64_t) next; }
 void set_string(uint64_t* entry, char* identifier)     { *(entry + 1) = (uint64_t) identifier; }
@@ -537,7 +535,6 @@ void set_type(uint64_t* entry, uint64_t type)          { *(entry + 4) = type; }
 void set_value(uint64_t* entry, uint64_t value)        { *(entry + 5) = value; }
 void set_address(uint64_t* entry, uint64_t address)    { *(entry + 6) = address; }
 void set_scope(uint64_t* entry, uint64_t scope)        { *(entry + 7) = scope; }
-void set_chunks(uint64_t* entry, uint64_t chunks)      { *(entry + 8) = chunks; }
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -1305,7 +1302,6 @@ uint64_t BEQ_LIMIT                 = 35;  // limit of symbolic beq instructions 
 void init_interpreter();
 void reset_interpreter();
 void reset_profiler();
-void adapt_chunks();
 
 void     print_register_hexadecimal(uint64_t reg);
 void     print_register_octal(uint64_t reg);
@@ -1460,27 +1456,6 @@ void reset_profiler() {
 
   loads_per_instruction  = zalloc(code_length / INSTRUCTIONSIZE * SIZEOFUINT64);
   stores_per_instruction = zalloc(code_length / INSTRUCTIONSIZE * SIZEOFUINT64);
-}
-
-void adapt_chunks(uint64_t* entry, uint64_t procedure_length, uint64_t chunks) {
-  uint64_t actual_binary_length;
-
-  actual_binary_length = binary_length;
-  
-  // increase binary length to a multiple of the fixed procedure length
-  if (chunks == 0) { // fillup to next chunk size
-    if ((procedure_length % MAX_CHUNK_LENGTH) > 0)
-      while (binary_length < actual_binary_length + (MAX_CHUNK_LENGTH - (procedure_length % MAX_CHUNK_LENGTH)))
-        emit_nop(); // write NOP to rest of chunk
-  } else {  // fill up to fixed chunk size
-    while (binary_length < (get_address(entry) + (MAX_CHUNK_LENGTH * chunks)))
-        emit_nop(); // write NOP to rest of chunk
-  }
-
-  // change chunk size of procedure
-  if (chunks == 0)
-    set_chunks(entry, ((binary_length - get_address(entry)) / MAX_CHUNK_LENGTH));
-
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -1965,13 +1940,14 @@ void selfie_increment();
 
 void read_user_input();
 void reset_increment_file_cursor();
+void reset_increment_eval_expres();
 
 void exit_recoverable(uint64_t code);
 
 uint64_t is_valid_call();
 uint64_t compile_source();
+uint64_t compile_quit_increment();
 uint64_t is_assignment();
-void reset_eval();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -5135,9 +5111,9 @@ void compile_cstar() {
       latest_hashed_entry_address = (uint64_t*) 0;
       
       if (eval_expression) {
-      // trigger call of eval-function
-      source_fd = open_write_only(INCREMENT_FILENAME);
-      write(source_fd, (uint64_t*)"eval()", string_length("eval()"));
+        // trigger call of eval-function
+        source_fd = open_write_only(INCREMENT_FILENAME);
+        write(source_fd, (uint64_t*)"increment_eval_expres()", string_length("increment_eval_expres()"));
       }
     }
   }
@@ -5369,78 +5345,78 @@ void selfie_compile() {
         link = 0;
       else if (load_character(peek_argument(0), 0) == '-')
         link = 0;
-        else {
-          source_name = get_argument();
+      else {
+        source_name = get_argument();
 
-          number_of_source_files = number_of_source_files + 1;
+        number_of_source_files = number_of_source_files + 1;
 
-          printf2("%s: selfie compiling %s with starc\n", selfie_name, source_name);
+        printf2("%s: selfie compiling %s with starc\n", selfie_name, source_name);
 
-          // assert: source_name is mapped and not longer than MAX_FILENAME_LENGTH
+        // assert: source_name is mapped and not longer than MAX_FILENAME_LENGTH
 
-          source_fd = sign_extend(open(source_name, O_RDONLY, 0), SYSCALL_BITWIDTH);
+        source_fd = sign_extend(open(source_name, O_RDONLY, 0), SYSCALL_BITWIDTH);
 
-          if (signed_less_than(source_fd, 0)) {
-            printf2("%s: could not open input file %s\n", selfie_name, source_name);
+        if (signed_less_than(source_fd, 0)) {
+          printf2("%s: could not open input file %s\n", selfie_name, source_name);
 
-            exit(EXITCODE_IOERROR);
-          }
-
-          reset_scanner();
-          reset_parser();
-
-          compile_cstar();
-
-          printf4("%s: %d characters read in %d lines and %d comments\n", selfie_name,
-            (char*) number_of_read_characters,
-            (char*) line_number,
-            (char*) number_of_comments);
-
-          printf4("%s: with %d(%.2d%%) characters in %d actual symbols\n", selfie_name,
-            (char*) (number_of_read_characters - number_of_ignored_characters),
-            (char*) fixed_point_percentage(fixed_point_ratio(number_of_read_characters, number_of_read_characters - number_of_ignored_characters, 4), 4),
-            (char*) number_of_scanned_symbols);
-
-          printf4("%s: %d global variables, %d procedures, %d string literals\n", selfie_name,
-            (char*) number_of_global_variables,
-            (char*) number_of_procedures,
-            (char*) number_of_strings);
-
-          printf6("%s: %d calls, %d assignments, %d while, %d if, %d return\n", selfie_name,
-            (char*) number_of_calls,
-            (char*) number_of_assignments,
-            (char*) number_of_while,
-            (char*) number_of_if,
-            (char*) number_of_return);
-          }
+          exit(EXITCODE_IOERROR);
         }
+
+        reset_scanner();
+        reset_parser();
+
+        compile_cstar();
+
+        printf4("%s: %d characters read in %d lines and %d comments\n", selfie_name,
+          (char*) number_of_read_characters,
+          (char*) line_number,
+          (char*) number_of_comments);
+
+        printf4("%s: with %d(%.2d%%) characters in %d actual symbols\n", selfie_name,
+          (char*) (number_of_read_characters - number_of_ignored_characters),
+          (char*) fixed_point_percentage(fixed_point_ratio(number_of_read_characters, number_of_read_characters - number_of_ignored_characters, 4), 4),
+          (char*) number_of_scanned_symbols);
+
+        printf4("%s: %d global variables, %d procedures, %d string literals\n", selfie_name,
+          (char*) number_of_global_variables,
+          (char*) number_of_procedures,
+          (char*) number_of_strings);
+
+        printf6("%s: %d calls, %d assignments, %d while, %d if, %d return\n", selfie_name,
+          (char*) number_of_calls,
+          (char*) number_of_assignments,
+          (char*) number_of_while,
+          (char*) number_of_if,
+          (char*) number_of_return);
       }
+    }
+  }
 
-      emit_bootstrapping();
+  emit_bootstrapping();
 
-      if (incremental == 0) {
-        if (number_of_source_files == 0)
-            printf1("%s: nothing to compile, only library generated\n", selfie_name);
+  if (incremental == 0) {
+    if (number_of_source_files == 0)
+        printf1("%s: nothing to compile, only library generated\n", selfie_name);
 
-        emit_data_segment();
+    emit_data_segment();
 
-        ELF_header = create_elf_header(binary_length, code_length);
+    ELF_header = create_elf_header(binary_length, code_length);
 
-        entry_point = ELF_ENTRY_POINT;
+    entry_point = ELF_ENTRY_POINT;
 
-        printf3("%s: symbol table search time was %d iterations on average and %d in total\n", selfie_name,
-          (char*) (total_search_time / number_of_searches),
-          (char*) total_search_time);
+    printf3("%s: symbol table search time was %d iterations on average and %d in total\n", selfie_name,
+      (char*) (total_search_time / number_of_searches),
+      (char*) total_search_time);
 
-        printf4("%s: %d bytes generated with %d instructions and %d bytes of data\n", selfie_name,
-          (char*) binary_length,
-          (char*) (code_length / INSTRUCTIONSIZE),
-          (char*) (binary_length - code_length));
+    printf4("%s: %d bytes generated with %d instructions and %d bytes of data\n", selfie_name,
+      (char*) binary_length,
+      (char*) (code_length / INSTRUCTIONSIZE),
+      (char*) (binary_length - code_length));
 
-        print_instruction_counters();
-      }
-      // in incremental mode: no need to emit data segment
-      // since this happens during compiling
+    print_instruction_counters();
+  }
+  // in incremental mode: no need to emit data segment
+  // since this happens during compiling
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -12796,7 +12772,7 @@ void selfie_increment() {
    
     if (syntax_error == 0) {
       if (is_valid_call()) {
-        //printf("valid call\n");
+        printf1("valid call %s\n", procedure_name);
         if (report_undefined_procedures() == 0) {
           // save address to jump to for later
           code_length = binary_length;
@@ -12818,14 +12794,11 @@ void selfie_increment() {
             mipster(current_context);
             *(get_regs(current_context) + REG_A0) = 0;
           }
-          if (eval_expression) {
-            eval_expression = 0;
-            binary_length_checkpoint = binary_length_rollback;
-            reset_eval();
-          }
+          if (eval_expression)          
+            reset_increment_eval_expres();
         }
       } else if (compile_source()) {
-        //printf("source\n");
+        print("source \n");
           if (syntax_error == 0) {
             source_fd = open(string, O_RDONLY, 0);
             
@@ -12840,6 +12813,8 @@ void selfie_increment() {
               compile_cstar();
             }
           }
+      } else if (compile_quit_increment()) {
+        incremental = 0;
       } else if (single_procedure_call + is_expression() == 1) {
         printf1("compiling expression %s", (char*)input_buffer);
         eval_expression = 1;
@@ -12849,19 +12824,21 @@ void selfie_increment() {
         if (is_assignment()) {
           // without return value (default return 0)
           source_fd = open_write_only(INCREMENT_FILENAME);
-          write(source_fd, (uint64_t*)"uint64_t eval(){", string_length("uint64_t eval(){"));
+          write(source_fd, (uint64_t*)"void increment_eval_expres(){", 
+                  string_length("void increment_eval_expres(){"));
           write(source_fd, input_buffer, string_length((char*)input_buffer));
           write(source_fd, (uint64_t*)"}", string_length("}")); 
         } else {
           // with return value
           source_fd = open_write_only(INCREMENT_FILENAME);
-          write(source_fd, (uint64_t*)"uint64_t eval(){return ", string_length("uint64_t eval(){return "));
+          write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){return ", 
+                  string_length("uint64_t increment_eval_expres(){return "));
           write(source_fd, input_buffer, string_length((char*)input_buffer));
           write(source_fd, (uint64_t*)"}", string_length("}"));
         }           
       } else {
         reset_increment_file_cursor();
-        //printf("Compile Method\n");
+        print("Compile Method\n");
         if (syntax_error == 0)
           compile_cstar();
       }
@@ -12933,7 +12910,7 @@ uint64_t is_valid_call() {
       get_symbol();
 
       while (symbol != SYM_RPARENTHESIS) {
-	// syntax error
+	      // syntax error
         if (symbol == SYM_EOF)
           return 0;
         get_symbol();
@@ -12943,10 +12920,10 @@ uint64_t is_valid_call() {
       if (symbol == SYM_EOF)
         single_procedure_call = 1;
       else if (symbol == SYM_SEMICOLON)
-	single_procedure_call = 1;
+	      single_procedure_call = 1;
       else {
         single_procedure_call = 0;
-	return 0;
+	      return 0;
       }
       // Go back to the position of the first function parameter
       reset_increment_file_cursor();
@@ -12987,6 +12964,21 @@ uint64_t compile_source() {
   return 0;
 }
 
+uint64_t compile_quit_increment() {
+  reset_increment_file_cursor();
+
+  if (symbol == SYM_MINUS) {
+    get_symbol();
+
+    if (symbol == SYM_IDENTIFIER) {
+      if (string_compare(identifier, "q"))
+        return 1;
+    }
+  }
+
+  return 0;
+}
+
 uint64_t is_assignment() {
   reset_increment_file_cursor();
 
@@ -12999,10 +12991,46 @@ uint64_t is_assignment() {
    return 0;
 }
 
-void reset_eval() {
+void reset_increment_eval_expres() {
   uint64_t* entry;
-  entry = search_global_symbol_table(string_copy("eval"), PROCEDURE);
-  set_address(entry, 0);  
+  uint64_t* entry_before;
+  
+  // get hashed index of global_symbol_table
+  entry = (uint64_t*) *(global_symbol_table + hash((uint64_t*) string_copy("increment_eval_expres")));
+  entry_before = (uint64_t*) 0;
+
+  // go through all indices of hashed index
+  while (entry != (uint64_t*) 0) {
+    total_search_time = total_search_time + 1;
+    
+    if (string_compare(string_copy("increment_eval_expres"), get_string(entry)))
+      if (PROCEDURE == get_class(entry)) {
+        if (entry_before == (uint64_t*) 0)
+          if (get_next_entry(entry) == (uint64_t*)0) {
+            // delete entry for inrementEvalExpres
+            *(global_symbol_table + hash((uint64_t*) string_copy("increment_eval_expres"))) = (uint64_t) 0;
+            entry = (uint64_t*) 0;
+          }
+          else {
+            *(global_symbol_table + hash((uint64_t*) string_copy("increment_eval_expres"))) = (uint64_t) get_next_entry(entry);
+            entry = (uint64_t*) 0;
+          }
+        else {
+          set_next_entry(entry_before, get_next_entry(entry));  // delete entry for inrementEvalExpres
+          entry = (uint64_t*) 0;
+        }
+      }
+    
+    // keep looking
+    if (entry != (uint64_t*) 0) {
+      entry_before = entry;
+      entry = get_next_entry(entry);
+    }
+  }
+  
+  eval_expression = 0;
+  binary_length_checkpoint = binary_length_rollback;
+  number_of_calls = number_of_calls -1;
 }
 
 
