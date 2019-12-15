@@ -1947,7 +1947,8 @@ void exit_recoverable(uint64_t code);
 uint64_t is_valid_call();
 uint64_t compile_source();
 uint64_t compile_quit_increment();
-uint64_t is_assignment();
+uint64_t is_statement();
+uint64_t is_single_call();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -1966,7 +1967,6 @@ uint64_t syntax_error = 0;
 // handle expression evaluation in incremental mode
 uint64_t eval_expression = 0;
 uint64_t binary_length_rollback = 0;
-uint64_t single_procedure_call = 0;
 
 // position where the jump to the called procedure will be generated
 uint64_t entry_point_incremental  = 0;
@@ -12765,37 +12765,39 @@ void selfie_increment() {
     }
    
     syntax_error = 0;
-    single_procedure_call = 0;
     binary_length = binary_length_checkpoint;
    
     reset_increment_file_cursor();
    
     if (syntax_error == 0) {
-      if (is_valid_call()) {
-        printf1("valid call %s\n", procedure_name);
-        if (report_undefined_procedures() == 0) {
-          // save address to jump to for later
-          code_length = binary_length;
-          // compile call (set up parameters etc)
-          compile_call(procedure_name);
-          // then emit the jump back directly to exit
-          emit_jalr(REG_ZR, REG_ZR, entry_point_incremental + INSTRUCTIONSIZE);
+      if (is_single_call()) {
+        print ("Single call\n"); 
+        if (is_valid_call()) {
+          printf1("valid call %s\n", procedure_name);
+          if (report_undefined_procedures() == 0) {
+            // save address to jump to for later
+            code_length = binary_length;
+            // compile call (set up parameters etc)
+            compile_call(procedure_name);
+            // then emit the jump back directly to exit
+            emit_jalr(REG_ZR, REG_ZR, entry_point_incremental + INSTRUCTIONSIZE);
             
-          if (syntax_error == 0) {
-            // fix jal instruction / program counter for the interpreter
-            store_instruction(entry_point_incremental, encode_j_format(code_length - entry_point_incremental, REG_RA, OP_JAL));
+            if (syntax_error == 0) {
+              // fix jal instruction / program counter for the interpreter
+              store_instruction(entry_point_incremental, encode_j_format(code_length - entry_point_incremental, REG_RA, OP_JAL));
                
-            // emit new data [restore allocated memory]
-            up_load_binary(current_context);
+              // emit new data [restore allocated memory]
+              up_load_binary(current_context);
                
-            // run with new binary
-            set_pc(current_context, entry_point_incremental);
+              // run with new binary
+              set_pc(current_context, entry_point_incremental);
                
-            mipster(current_context);
-            *(get_regs(current_context) + REG_A0) = 0;
+              mipster(current_context);
+              *(get_regs(current_context) + REG_A0) = 0;
+            }
+            if (eval_expression)          
+              reset_increment_eval_expres();
           }
-          if (eval_expression)          
-            reset_increment_eval_expres();
         }
       } else if (compile_source()) {
         print("source \n");
@@ -12815,19 +12817,20 @@ void selfie_increment() {
           }
       } else if (compile_quit_increment()) {
         incremental = 0;
-      } else if (single_procedure_call + is_expression() == 1) {
+      } else if (is_expression() + is_statement()) {
         printf1("compiling expression %s", (char*)input_buffer);
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
+	reset_increment_file_cursor();
         // embed the expression in a function body
-        if (is_assignment()) {
+        if (is_statement()) {
           // without return value (default return 0)
           source_fd = open_write_only(INCREMENT_FILENAME);
-          write(source_fd, (uint64_t*)"void increment_eval_expres(){", 
-                  string_length("void increment_eval_expres(){"));
+          write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){", 
+                  string_length("uint64_t increment_eval_expres(){"));
           write(source_fd, input_buffer, string_length((char*)input_buffer));
-          write(source_fd, (uint64_t*)"}", string_length("}")); 
+          write(source_fd, (uint64_t*)"}", string_length("}")); 	            
         } else {
           // with return value
           source_fd = open_write_only(INCREMENT_FILENAME);
@@ -12901,6 +12904,8 @@ void exit_recoverable(uint64_t code) {
 uint64_t is_valid_call() {
   uint64_t* procedure_entry;
 
+  reset_increment_file_cursor();
+
   if (symbol == SYM_IDENTIFIER) {
     procedure_name = identifier;
 
@@ -12908,27 +12913,6 @@ uint64_t is_valid_call() {
 
     if (symbol == SYM_LPARENTHESIS) {
       get_symbol();
-
-      while (symbol != SYM_RPARENTHESIS) {
-	      // syntax error
-        if (symbol == SYM_EOF)
-          return 0;
-        get_symbol();
-      }
-      
-      get_symbol();
-      if (symbol == SYM_EOF)
-        single_procedure_call = 1;
-      else if (symbol == SYM_SEMICOLON)
-	      single_procedure_call = 1;
-      else {
-        single_procedure_call = 0;
-	      return 0;
-      }
-      // Go back to the position of the first function parameter
-      reset_increment_file_cursor();
-      get_symbol();
-      get_symbol();     
 
       procedure_entry = get_scoped_symbol_table_entry(procedure_name, PROCEDURE);
 
@@ -12979,16 +12963,55 @@ uint64_t compile_quit_increment() {
   return 0;
 }
 
-uint64_t is_assignment() {
+uint64_t is_statement() {
   reset_increment_file_cursor();
 
+  if (symbol == SYM_IF)
+    return 1;
+  else if (symbol == SYM_WHILE)
+    return 1;
+  else if (symbol == SYM_RETURN)
+    return 1;
+  else if (symbol == SYM_UINT64)
+    return 0;
+  else if (symbol == SYM_VOID)
+    return 0;
+
   while (symbol != SYM_EOF) {
-    // Assignment
     if (symbol == SYM_ASSIGN)
       return 1;
     get_symbol();
-   }
-   return 0;
+  }
+  return 0;
+}
+
+uint64_t is_single_call() {
+  reset_increment_file_cursor();
+
+  if (symbol == SYM_IDENTIFIER) {
+    get_symbol();
+
+    if (symbol == SYM_LPARENTHESIS) {
+      get_symbol();
+
+      while (symbol != SYM_RPARENTHESIS) {
+	// syntax error
+        if (symbol == SYM_EOF)
+          return 0;
+        get_symbol();
+      }
+      
+      get_symbol();
+      if (symbol == SYM_EOF)
+        return 1;
+      else if (symbol == SYM_SEMICOLON)
+        return 1;
+      else 
+	return 0;
+    }
+    return 0;
+  }
+  return 0;
 }
 
 void reset_increment_eval_expres() {
