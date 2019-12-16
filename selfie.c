@@ -3464,6 +3464,7 @@ uint64_t is_not_rbrace_or_eof() {
 }
 
 uint64_t is_expression() {
+
   if (symbol == SYM_MINUS)
     return 1;
   else if (symbol == SYM_LPARENTHESIS)
@@ -12769,8 +12770,26 @@ void selfie_increment() {
     reset_increment_file_cursor();
    
     if (syntax_error == 0) {
-      if (is_single_call()) {
-        print ("Single call\n"); 
+      if (compile_source()) {
+        print("source \n");
+          if (syntax_error == 0) {
+            source_fd = open(string, O_RDONLY, 0);
+            
+            if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
+              printf2("%s: could not open input file %s\n", selfie_name, string);
+            else {
+              printf1("compiling %s ...\n", string);
+               
+              get_character();
+              get_symbol();
+               
+              compile_cstar();
+            }
+          }
+      } else if (compile_quit_increment()) {
+        incremental = 0;
+      } else if (is_single_call()) {
+        print ("Single call\n");
         if (is_valid_call()) {
           printf1("valid call %s\n", procedure_name);
           if (report_undefined_procedures() == 0) {
@@ -12796,29 +12815,15 @@ void selfie_increment() {
               mipster(current_context);
               *(get_regs(current_context) + REG_A0) = 0;
             }
+
             if (eval_expression)          
               reset_increment_eval_expres();
+          } else {
+            eval_expression = 0;
           }
+          
         }
-      } else if (compile_source()) {
-        print("source \n");
-          if (syntax_error == 0) {
-            source_fd = open(string, O_RDONLY, 0);
-            
-            if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
-              printf2("%s: could not open input file %s\n", selfie_name, string);
-            else {
-              printf1("compiling %s ...\n", string);
-               
-              get_character();
-              get_symbol();
-               
-              compile_cstar();
-            }
-          }
-      } else if (compile_quit_increment()) {
-        incremental = 0;
-      } else if (is_expression() + is_statement()) {
+      } else if (is_statement() + is_expression()) {
         printf1("compiling expression %s", (char*)input_buffer);
         eval_expression = 1;
         binary_length_rollback = binary_length;
@@ -12934,15 +12939,21 @@ uint64_t is_valid_call() {
 uint64_t compile_source() {
   reset_increment_file_cursor();
 
-  if (symbol == SYM_MINUS) {
-    get_symbol();
-
-    if (symbol == SYM_IDENTIFIER) {
-      if (string_compare(identifier, "c")) {
+  if (symbol == SYM_IDENTIFIER) {
+    if (string_compare(identifier, "compile")) {
         get_symbol();
 
-        return symbol == SYM_STRING;
-      }
+        if (symbol == SYM_LPARENTHESIS) {
+          get_symbol();
+
+          if (symbol == SYM_STRING) {
+            get_symbol();
+
+              if (symbol == SYM_RPARENTHESIS) {
+                return 1;
+              }
+          }
+        }
     }
   }
 
@@ -12952,12 +12963,17 @@ uint64_t compile_source() {
 uint64_t compile_quit_increment() {
   reset_increment_file_cursor();
 
-  if (symbol == SYM_MINUS) {
-    get_symbol();
+  if (symbol == SYM_IDENTIFIER) {
+    if (string_compare(identifier, "exit")) {
+        get_symbol();
 
-    if (symbol == SYM_IDENTIFIER) {
-      if (string_compare(identifier, "q"))
-        return 1;
+        if (symbol == SYM_LPARENTHESIS) {
+          get_symbol();
+
+          if (symbol == SYM_RPARENTHESIS) {
+            return 1;
+          }
+        }
     }
   }
 
@@ -12979,10 +12995,13 @@ uint64_t is_statement() {
     return 0;
 
   while (symbol != SYM_EOF) {
-    if (symbol == SYM_ASSIGN)
+    if (symbol == SYM_ASSIGN) {
+      reset_increment_file_cursor();
       return 1;
+    }
     get_symbol();
   }
+  reset_increment_file_cursor();
   return 0;
 }
 
@@ -12996,7 +13015,7 @@ uint64_t is_single_call() {
       get_symbol();
 
       while (symbol != SYM_RPARENTHESIS) {
-	// syntax error
+	    // syntax error
         if (symbol == SYM_EOF)
           return 0;
         get_symbol();
