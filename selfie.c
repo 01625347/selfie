@@ -931,7 +931,6 @@ uint64_t MAX_BINARY_LENGTH = 524288; // 512KB = MAX_CODE_LENGTH + MAX_DATA_LENGT
 
 uint64_t MAX_CODE_LENGTH = 491520; // 480KB
 uint64_t MAX_DATA_LENGTH = 32768; // 32KB
-uint64_t MAX_CHUNK_LENGTH = 1;  // 200 Byte, must be multiple of INSTRUCTIONSIZE (4 Byte)
 
 // page-aligned ELF header for storing file header (64 bytes),
 // program header (56 bytes), and code length (8 bytes)
@@ -3322,7 +3321,7 @@ void create_symbol_table_entry(uint64_t which_table, char* string, uint64_t line
     if (incremental) {
       // use offset from MAX_BINARY_LENGTH due to different memory layout
       baddr = MAX_BINARY_LENGTH - allocated_memory;
-
+      printf2("Var: %s offset: %d\n",string, allocated_memory);
       if (class == STRING) {
         emit_string_data(new_entry);
 
@@ -6028,7 +6027,7 @@ void emit_string_data(uint64_t* entry) {
 void emit_data_segment() {
   uint64_t i;
   uint64_t* entry;
-
+  printf1("allocated: %d \n",allocated_memory);
   binary_length = binary_length + allocated_memory;
 
   i = 0;
@@ -12785,7 +12784,9 @@ void selfie_increment() {
             if (syntax_error == 0) {
               // fix jal instruction / program counter for the interpreter
               store_instruction(entry_point_incremental, encode_j_format(code_length - entry_point_incremental, REG_RA, OP_JAL));
-               
+              
+              // set to MAX_BINARY_LENGTH so whole binary will be uploaded
+              //binary_length = MAX_BINARY_LENGTH;
               // emit new data [restore allocated memory]
               up_load_binary(current_context);
                
@@ -12822,7 +12823,7 @@ void selfie_increment() {
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	reset_increment_file_cursor();
+	      reset_increment_file_cursor();
         // embed the expression in a function body
         if (is_statement()) {
           // without return value (default return 0)
