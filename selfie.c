@@ -1947,6 +1947,7 @@ void exit_recoverable(uint64_t code);
 uint64_t is_valid_call();
 uint64_t compile_source();
 uint64_t compile_quit_increment();
+uint64_t is_expression_increment();
 uint64_t is_statement();
 uint64_t is_single_call();
 
@@ -12770,10 +12771,28 @@ void selfie_increment() {
     reset_increment_file_cursor();
    
     if (syntax_error == 0) {
-      if (is_single_call()) {
-        print ("Single call\n"); 
+      if (compile_source()) {
+        
+          if (syntax_error == 0) {
+            source_fd = open(string, O_RDONLY, 0);
+            
+            if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
+              printf2("%s: could not open input file %s\n", selfie_name, string);
+            else {
+              printf1("compiling %s ...\n", string);
+               
+              get_character();
+              get_symbol();
+               
+              compile_cstar();
+            }
+          }
+      } else if (compile_quit_increment()) {
+        incremental = 0;
+      } else if (is_single_call()) {
+        
         if (is_valid_call()) {
-          printf1("valid call %s\n", procedure_name);
+          
           if (report_undefined_procedures() == 0) {
             // save address to jump to for later
             code_length = binary_length;
@@ -12797,32 +12816,15 @@ void selfie_increment() {
             }
             if (eval_expression)          
               reset_increment_eval_expres();
-          }
+          } else
+            eval_expression = 0;
         }
-      } else if (compile_source()) {
-        print("source \n");
-          if (syntax_error == 0) {
-            source_fd = open(string, O_RDONLY, 0);
-            
-            if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
-              printf2("%s: could not open input file %s\n", selfie_name, string);
-            else {
-              printf1("compiling %s ...\n", string);
-               
-              get_character();
-              get_symbol();
-               
-              compile_cstar();
-            }
-          }
-      } else if (compile_quit_increment()) {
-        incremental = 0;
-      } else if (is_expression() + is_statement()) {
-        printf1("compiling expression %s", (char*)input_buffer);
+      } else if (is_expression_increment() + is_statement()) {
+        
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	reset_increment_file_cursor();
+	      reset_increment_file_cursor();
         // embed the expression in a function body
         if (is_statement()) {
           // without return value (default return 0)
@@ -12841,7 +12843,7 @@ void selfie_increment() {
         }           
       } else {
         reset_increment_file_cursor();
-        print("Compile Method\n");
+        
         if (syntax_error == 0)
           compile_cstar();
       }
@@ -12933,15 +12935,21 @@ uint64_t is_valid_call() {
 uint64_t compile_source() {
   reset_increment_file_cursor();
 
-  if (symbol == SYM_MINUS) {
-    get_symbol();
-
-    if (symbol == SYM_IDENTIFIER) {
-      if (string_compare(identifier, "c")) {
+  if (symbol == SYM_IDENTIFIER) {
+    if (string_compare(identifier, "compile")) {
         get_symbol();
 
-        return symbol == SYM_STRING;
-      }
+        if (symbol == SYM_LPARENTHESIS) {
+          get_symbol();
+
+          if (symbol == SYM_STRING) {
+            get_symbol();
+
+              if (symbol == SYM_RPARENTHESIS) {
+                return 1;
+              }
+          }
+        }
     }
   }
 
@@ -12951,12 +12959,17 @@ uint64_t compile_source() {
 uint64_t compile_quit_increment() {
   reset_increment_file_cursor();
 
-  if (symbol == SYM_MINUS) {
-    get_symbol();
+  if (symbol == SYM_IDENTIFIER) {
+    if (string_compare(identifier, "exit")) {
+        get_symbol();
 
-    if (symbol == SYM_IDENTIFIER) {
-      if (string_compare(identifier, "q"))
-        return 1;
+        if (symbol == SYM_LPARENTHESIS) {
+          get_symbol();
+
+          if (symbol == SYM_RPARENTHESIS) {
+            return 1;
+          }
+        }
     }
   }
 
@@ -12982,7 +12995,30 @@ uint64_t is_statement() {
       return 1;
     get_symbol();
   }
+
   return 0;
+}
+
+uint64_t is_expression_increment() {
+  reset_increment_file_cursor();
+
+  if (symbol == SYM_MINUS)
+    return 1;
+  else if (symbol == SYM_LPARENTHESIS)
+    return 1;
+  else if (symbol == SYM_IDENTIFIER)
+    return 1;
+  else if (symbol == SYM_INTEGER)
+    return 1;
+  else if (symbol == SYM_ASTERISK)
+    return 1;
+  else if (symbol == SYM_STRING)
+    return 1;
+  else if (symbol == SYM_CHARACTER)
+    return 1;
+  else
+    return 0;
+
 }
 
 uint64_t is_single_call() {
@@ -12995,7 +13031,7 @@ uint64_t is_single_call() {
       get_symbol();
 
       while (symbol != SYM_RPARENTHESIS) {
-	// syntax error
+	      // syntax error
         if (symbol == SYM_EOF)
           return 0;
         get_symbol();
