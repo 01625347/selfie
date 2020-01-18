@@ -1962,6 +1962,8 @@ char* INCREMENT_FILENAME = (char*) 0;
 
 // indicate if compiler is in incremental mode or not
 uint64_t incremental  = 0;
+// print result if type is not void
+uint64_t incremental_type = 0;
 uint64_t syntax_error = 0;
 
 // handle expression evaluation in incremental mode
@@ -6355,10 +6357,21 @@ void implement_exit(uint64_t* context) {
     return;
   }
 
-  printf4("%s: %s exiting with exit code %d and %.2dMB mallocated memory\n", selfie_name,
-    get_name(context),
-    (char*) sign_extend(get_exit_code(context), SYSCALL_BITWIDTH),
-    (char*) fixed_point_ratio(get_program_break(context) - get_original_break(context), MEGABYTE, 2));
+  if (incremental == 1) {
+    if (incremental_type < 3) {
+      if (incremental_type == 0) {
+        println();
+      } else 
+        printf1("  %d \n", (char*) sign_extend(get_exit_code(context), SYSCALL_BITWIDTH));
+    }
+  }
+  else {
+    printf4("%s: %s exiting with exit code %d and %.2dMB mallocated memory\n", selfie_name,
+      get_name(context),
+      (char*) sign_extend(get_exit_code(context), SYSCALL_BITWIDTH),
+      (char*) fixed_point_ratio(get_program_break(context) - get_original_break(context), MEGABYTE, 2));
+  }
+
 }
 
 void emit_read() {
@@ -9947,7 +9960,8 @@ uint64_t mipster(uint64_t* to_context) {
   uint64_t timeout;
   uint64_t* from_context;
 
-  print("mipster\n");
+  if (incremental == 0)
+    print("mipster\n");
 
   timeout = TIMESLICE;
 
@@ -12785,7 +12799,7 @@ void selfie_increment() {
             if (signed_less_than(sign_extend(source_fd, SYSCALL_BITWIDTH), 0))
               printf2("%s: could not open input file %s\n", selfie_name, string);
             else {
-              printf1("compiling %s ...\n", string);
+              printf1("  Compiling %s ...\n", string);
                
               get_character();
               get_symbol();
@@ -12827,7 +12841,7 @@ void selfie_increment() {
             eval_expression = 0;
         }
         else {
-            printf1("%s: no valid call!\n", selfie_name);
+            print("  Not a valid call!\n");
         }
       } else if (is_statement()) {
         
@@ -12842,7 +12856,7 @@ void selfie_increment() {
                 string_length("uint64_t increment_eval_expres(){"));
         write(source_fd, input_buffer, string_length((char*)input_buffer));
         write(source_fd, (uint64_t*)"}", string_length("}")); 	   
-        printf1("%s: compile statement.\n", selfie_name);
+        //printf1("%s: compile statement.\n", selfie_name);
 
       } else if (is_expression()) {
         
@@ -12857,7 +12871,7 @@ void selfie_increment() {
                 string_length("uint64_t increment_eval_expres(){return "));
         write(source_fd, input_buffer, string_length((char*)input_buffer));
         write(source_fd, (uint64_t*)"}", string_length("}"));
-        printf1("%s: compile expression\n", selfie_name);
+        //printf1("%s: compile expression\n", selfie_name);
         
       } else {
         reset_increment_file_cursor();
@@ -12940,9 +12954,11 @@ uint64_t is_valid_call() {
         return 0;
       else if (get_address(procedure_entry) == 0)
         return 0;
-      else if (get_opcode(load_instruction(get_address(procedure_entry))) != OP_JAL)
+      else if (get_opcode(load_instruction(get_address(procedure_entry))) != OP_JAL) {
         // procedure defined
+        incremental_type = get_type(procedure_entry);
         return 1;
+      }
     }
   }
 
