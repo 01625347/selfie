@@ -3601,6 +3601,7 @@ uint64_t current_temporary() {
 
     exit_recoverable(EXITCODE_COMPILERERROR);
   }
+  return 0;
 }
 
 uint64_t previous_temporary() {
@@ -3614,6 +3615,7 @@ uint64_t previous_temporary() {
 
     exit_recoverable(EXITCODE_COMPILERERROR);
   }
+  return 0;
 }
 
 uint64_t next_temporary() {
@@ -3627,6 +3629,7 @@ uint64_t next_temporary() {
 
     exit_recoverable(EXITCODE_COMPILERERROR);
   }
+  return 0;
 }
 
 void tfree(uint64_t number_of_temporaries) {
@@ -3873,9 +3876,13 @@ uint64_t help_call_codegen(uint64_t* entry, char* procedure) {
       // create fixup chain using absolute address
       emit_jal(REG_RA, get_address(entry));
       set_address(entry, binary_length - INSTRUCTIONSIZE);
-    } else
+    } else {
       // procedure defined, use relative address
       emit_jal(REG_RA, get_address(entry) - binary_length);
+      //load_integer(get_address(entry));
+      //emit_jalr(REG_RA, current_temporary(), REG_ZR);
+      //tfree(1);
+    }
   }
 
   return type;
@@ -12793,7 +12800,8 @@ void selfie_increment() {
         
         if (is_valid_call()) {
           
-          if (report_undefined_procedures() == 0) {
+          //if (report_undefined_procedures() == 0) {
+          if (1) {
             // save address to jump to for later
             code_length = binary_length;
             // compile call (set up parameters etc)
@@ -12819,6 +12827,9 @@ void selfie_increment() {
           } else
             eval_expression = 0;
         }
+        else {
+            printf1("%s: no valid call!\n", selfie_name);
+        }
       } else if (is_expression_increment() + is_statement()) {
         
         eval_expression = 1;
@@ -12832,7 +12843,8 @@ void selfie_increment() {
           write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){", 
                   string_length("uint64_t increment_eval_expres(){"));
           write(source_fd, input_buffer, string_length((char*)input_buffer));
-          write(source_fd, (uint64_t*)"}", string_length("}")); 	            
+          write(source_fd, (uint64_t*)"}", string_length("}"));
+          printf1("%s: compile statement.\n", selfie_name);	            
         } else {
           // with return value
           source_fd = open_write_only(INCREMENT_FILENAME);
@@ -12840,7 +12852,8 @@ void selfie_increment() {
                   string_length("uint64_t increment_eval_expres(){return "));
           write(source_fd, input_buffer, string_length((char*)input_buffer));
           write(source_fd, (uint64_t*)"}", string_length("}"));
-        }           
+          printf1("%s: compile expression\n", selfie_name);
+        }         
       } else {
         reset_increment_file_cursor();
         
@@ -13062,9 +13075,9 @@ void reset_increment_eval_expres() {
   while (entry != (uint64_t*) 0) {
     total_search_time = total_search_time + 1;
     
-    if (string_compare(string_copy("increment_eval_expres"), get_string(entry)))
+    if (string_compare(string_copy("increment_eval_expres"), get_string(entry))) {
       if (PROCEDURE == get_class(entry)) {
-        if (entry_before == (uint64_t*) 0)
+        if (entry_before == (uint64_t*) 0) {
           if (get_next_entry(entry) == (uint64_t*)0) {
             // delete entry for inrementEvalExpres
             *(global_symbol_table + hash((uint64_t*) string_copy("increment_eval_expres"))) = (uint64_t) 0;
@@ -13074,11 +13087,13 @@ void reset_increment_eval_expres() {
             *(global_symbol_table + hash((uint64_t*) string_copy("increment_eval_expres"))) = (uint64_t) get_next_entry(entry);
             entry = (uint64_t*) 0;
           }
+        }
         else {
           set_next_entry(entry_before, get_next_entry(entry));  // delete entry for inrementEvalExpres
           entry = (uint64_t*) 0;
         }
       }
+    }
     
     // keep looking
     if (entry != (uint64_t*) 0) {
