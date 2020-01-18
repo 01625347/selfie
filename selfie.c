@@ -1947,7 +1947,6 @@ void exit_recoverable(uint64_t code);
 uint64_t is_valid_call();
 uint64_t compile_source();
 uint64_t compile_quit_increment();
-uint64_t is_expression_increment();
 uint64_t is_statement();
 uint64_t is_single_call();
 
@@ -12819,28 +12818,34 @@ void selfie_increment() {
           } else
             eval_expression = 0;
         }
-      } else if (is_expression_increment() + is_statement()) {
+      } else if (is_statement()) {
         
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	      reset_increment_file_cursor();
+	reset_increment_file_cursor();
         // embed the expression in a function body
-        if (is_statement()) {
-          // without return value (default return 0)
-          source_fd = open_write_only(INCREMENT_FILENAME);
-          write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){", 
-                  string_length("uint64_t increment_eval_expres(){"));
-          write(source_fd, input_buffer, string_length((char*)input_buffer));
-          write(source_fd, (uint64_t*)"}", string_length("}")); 	            
-        } else {
-          // with return value
-          source_fd = open_write_only(INCREMENT_FILENAME);
-          write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){return ", 
-                  string_length("uint64_t increment_eval_expres(){return "));
-          write(source_fd, input_buffer, string_length((char*)input_buffer));
-          write(source_fd, (uint64_t*)"}", string_length("}"));
-        }           
+        // without return value (default return 0)
+        source_fd = open_write_only(INCREMENT_FILENAME);
+        write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){", 
+                string_length("uint64_t increment_eval_expres(){"));
+        write(source_fd, input_buffer, string_length((char*)input_buffer));
+        write(source_fd, (uint64_t*)"}", string_length("}")); 	   
+         
+      } else if (is_expression()) {
+        
+        eval_expression = 1;
+        binary_length_rollback = binary_length;
+
+	reset_increment_file_cursor();
+        // embed the expression in a function body
+        // with return value
+        source_fd = open_write_only(INCREMENT_FILENAME);
+        write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){return ", 
+                string_length("uint64_t increment_eval_expres(){return "));
+        write(source_fd, input_buffer, string_length((char*)input_buffer));
+        write(source_fd, (uint64_t*)"}", string_length("}"));
+           
       } else {
         reset_increment_file_cursor();
         
@@ -12976,32 +12981,33 @@ uint64_t compile_quit_increment() {
   return 0;
 }
 
+// if 0 do reset_increment_file_cursor() for is_expression() which will be called next
 uint64_t is_statement() {
   reset_increment_file_cursor();
-
+  // handle if (else) / while /return
   if (symbol == SYM_IF)
     return 1;
   else if (symbol == SYM_WHILE)
     return 1;
   else if (symbol == SYM_RETURN)
     return 1;
-  else if (symbol == SYM_UINT64)
+  // handle function / variable definition
+  else if (symbol == SYM_UINT64) {
+    reset_increment_file_cursor();
     return 0;
-  else if (symbol == SYM_VOID)
+  }
+  else if (symbol == SYM_VOID) {
+    reset_increment_file_cursor();
     return 0;
-
+  }
+  // handle assignment
   while (symbol != SYM_EOF) {
     if (symbol == SYM_ASSIGN)
       return 1;
     get_symbol();
   }
-
-  return 0;
-}
-
-uint64_t is_expression_increment() {
   reset_increment_file_cursor();
-  is_expression();
+  return 0;
 }
 
 uint64_t is_single_call() {
