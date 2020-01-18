@@ -13001,24 +13001,7 @@ uint64_t is_statement() {
 
 uint64_t is_expression_increment() {
   reset_increment_file_cursor();
-
-  if (symbol == SYM_MINUS)
-    return 1;
-  else if (symbol == SYM_LPARENTHESIS)
-    return 1;
-  else if (symbol == SYM_IDENTIFIER)
-    return 1;
-  else if (symbol == SYM_INTEGER)
-    return 1;
-  else if (symbol == SYM_ASTERISK)
-    return 1;
-  else if (symbol == SYM_STRING)
-    return 1;
-  else if (symbol == SYM_CHARACTER)
-    return 1;
-  else
-    return 0;
-
+  is_expression();
 }
 
 uint64_t is_single_call() {
