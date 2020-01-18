@@ -12834,7 +12834,7 @@ void selfie_increment() {
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	reset_increment_file_cursor();
+	      reset_increment_file_cursor();
         // embed the expression in a function body
         // without return value (default return 0)
         source_fd = open_write_only(INCREMENT_FILENAME);
@@ -12842,13 +12842,14 @@ void selfie_increment() {
                 string_length("uint64_t increment_eval_expres(){"));
         write(source_fd, input_buffer, string_length((char*)input_buffer));
         write(source_fd, (uint64_t*)"}", string_length("}")); 	   
-          printf1("%s: compile statement.\n", selfie_name);	            
+        printf1("%s: compile statement.\n", selfie_name);
+
       } else if (is_expression()) {
         
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	reset_increment_file_cursor();
+	      reset_increment_file_cursor();
         // embed the expression in a function body
         // with return value
         source_fd = open_write_only(INCREMENT_FILENAME);
@@ -12856,8 +12857,8 @@ void selfie_increment() {
                 string_length("uint64_t increment_eval_expres(){return "));
         write(source_fd, input_buffer, string_length((char*)input_buffer));
         write(source_fd, (uint64_t*)"}", string_length("}"));
-          printf1("%s: compile expression\n", selfie_name);
-        }         
+        printf1("%s: compile expression\n", selfie_name);
+        
       } else {
         reset_increment_file_cursor();
         
