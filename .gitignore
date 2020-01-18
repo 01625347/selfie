@@ -5,6 +5,7 @@
 /*.btor2
 /*.sat
 /*.increment
+/*.orig
 selfie
 selfie.exe
 manuscript/code/symbolic/*.smt
