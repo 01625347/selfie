@@ -5112,6 +5112,8 @@ void compile_cstar() {
         syntax_error = 0;
         // undo last code generation by resetting binary_length
         binary_length = binary_length_checkpoint;
+        // reset function definition
+        reset_increment_eval_expres();
 
       } else
         // so far everything had correct syntax
@@ -12812,7 +12814,6 @@ void selfie_increment() {
       } else if (is_single_call()) {
         
         if (is_valid_call()) {
-          
           //if (report_undefined_procedures() == 0) {
           if (1) {
             // save address to jump to for later
@@ -12843,27 +12844,24 @@ void selfie_increment() {
         else {
             print("  Not a valid call!\n");
         }
-      } else if (is_statement()) {
-        
+      } else if (is_statement()) {     
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	      reset_increment_file_cursor();
+	reset_increment_file_cursor();
         // embed the expression in a function body
         // without return value (default return 0)
         source_fd = open_write_only(INCREMENT_FILENAME);
         write(source_fd, (uint64_t*)"uint64_t increment_eval_expres(){", 
                 string_length("uint64_t increment_eval_expres(){"));
         write(source_fd, input_buffer, string_length((char*)input_buffer));
-        write(source_fd, (uint64_t*)"}", string_length("}")); 	   
-        //printf1("%s: compile statement.\n", selfie_name);
+        write(source_fd, (uint64_t*)"}", string_length("}")); 
 
       } else if (is_expression()) {
-        
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	      reset_increment_file_cursor();
+	reset_increment_file_cursor();
         // embed the expression in a function body
         // with return value
         source_fd = open_write_only(INCREMENT_FILENAME);
@@ -12871,11 +12869,9 @@ void selfie_increment() {
                 string_length("uint64_t increment_eval_expres(){return "));
         write(source_fd, input_buffer, string_length((char*)input_buffer));
         write(source_fd, (uint64_t*)"}", string_length("}"));
-        //printf1("%s: compile expression\n", selfie_name);
         
       } else {
         reset_increment_file_cursor();
-        
         if (syntax_error == 0)
           compile_cstar();
       }
@@ -13029,7 +13025,7 @@ uint64_t is_statement() {
     reset_increment_file_cursor();
     return 0;
   }
-  // handle assignment
+  // handle assignment and check for return
   while (symbol != SYM_EOF) {
     if (symbol == SYM_ASSIGN)
       return 1;
@@ -13040,6 +13036,9 @@ uint64_t is_statement() {
 }
 
 uint64_t is_single_call() {
+  uint64_t bracket_counter;
+  uint64_t func_closed;
+
   reset_increment_file_cursor();
 
   if (symbol == SYM_IDENTIFIER) {
@@ -13047,23 +13046,25 @@ uint64_t is_single_call() {
 
     if (symbol == SYM_LPARENTHESIS) {
       get_symbol();
+      bracket_counter = 1;
+      func_closed = 0;
 
-      while (symbol != SYM_RPARENTHESIS) {
-	      // syntax error
-        if (symbol == SYM_EOF)
-          return 0;
+      while (symbol != SYM_EOF) {
+        if (func_closed) {
+          if (symbol == SYM_SEMICOLON)
+            return 1;
+          else
+            return 0;
+        }
+        if (symbol == SYM_LPARENTHESIS)
+          bracket_counter = bracket_counter + 1;
+        if (symbol == SYM_RPARENTHESIS) 
+          bracket_counter = bracket_counter - 1;
+        if (bracket_counter == 0)
+          func_closed = 1;
         get_symbol();
       }
-      
-      get_symbol();
-      if (symbol == SYM_EOF)
-        return 1;
-      else if (symbol == SYM_SEMICOLON)
-        return 1;
-      else 
-	return 0;
     }
-    return 0;
   }
   return 0;
 }
@@ -13071,7 +13072,6 @@ uint64_t is_single_call() {
 void reset_increment_eval_expres() {
   uint64_t* entry;
   uint64_t* entry_before;
-  
   // get hashed index of global_symbol_table
   entry = (uint64_t*) *(global_symbol_table + hash((uint64_t*) string_copy("increment_eval_expres")));
   entry_before = (uint64_t*) 0;
