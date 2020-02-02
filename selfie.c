@@ -5124,7 +5124,7 @@ void compile_cstar() {
       if (eval_expression) {
         // trigger call of eval-function
         source_fd = open_write_only(INCREMENT_FILENAME);
-        write(source_fd, (uint64_t*)"increment_eval_expres()", string_length("increment_eval_expres()"));
+        write(source_fd, (uint64_t*)"increment_eval_expres();", string_length("increment_eval_expres();"));
       }
     }
   }
