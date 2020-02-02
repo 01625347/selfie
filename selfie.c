@@ -931,7 +931,6 @@ uint64_t MAX_BINARY_LENGTH = 524288; // 512KB = MAX_CODE_LENGTH + MAX_DATA_LENGT
 
 uint64_t MAX_CODE_LENGTH = 491520; // 480KB
 uint64_t MAX_DATA_LENGTH = 32768; // 32KB
-uint64_t MAX_CHUNK_LENGTH = 1;  // 200 Byte, must be multiple of INSTRUCTIONSIZE (4 Byte)
 
 // page-aligned ELF header for storing file header (64 bytes),
 // program header (56 bytes), and code length (8 bytes)
@@ -1945,10 +1944,10 @@ void reset_increment_eval_expres();
 void exit_recoverable(uint64_t code);
 
 uint64_t is_valid_call();
-uint64_t compile_source();
-uint64_t compile_quit_increment();
 uint64_t is_statement();
 uint64_t is_single_call();
+uint64_t compile_source();
+uint64_t compile_quit_increment();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -1962,7 +1961,7 @@ char* INCREMENT_FILENAME = (char*) 0;
 
 // indicate if compiler is in incremental mode or not
 uint64_t incremental  = 0;
-// print result if type is not void
+// indicate return type
 uint64_t incremental_type = 0;
 uint64_t syntax_error = 0;
 
@@ -3318,6 +3317,8 @@ void create_symbol_table_entry(uint64_t which_table, char* string, uint64_t line
 
     set_next_entry(new_entry, (uint64_t*) *hashed_entry_address);
     *hashed_entry_address = (uint64_t) new_entry;
+
+    // **** BEGIN INTERPRETER ****
     latest_hashed_entry_address = hashed_entry_address;
 
     // if in incremental mode upload new entry to binary immediately
@@ -3344,6 +3345,7 @@ void create_symbol_table_entry(uint64_t which_table, char* string, uint64_t line
         map_and_store(current_context, baddr, load_data(baddr));
       }
     }
+    // **** END INTERPRETER ****
 
     if (class == VARIABLE)
       number_of_global_variables = number_of_global_variables + 1;
@@ -3692,15 +3694,15 @@ void print_type(uint64_t type) {
 }
 
 void type_warning(uint64_t expected, uint64_t found) {
-  if (eval_expression)
-    return;
-
-  print_line_number("warning", line_number);
-  print("type mismatch, ");
-  print_type(expected);
-  print(" expected but ");
-  print_type(found);
-  print(" found\n");  
+  
+  if (eval_expression == 0) { // **** INTERPRETER CHECK ****
+    print_line_number("warning", line_number);
+    print("type mismatch, ");
+    print_type(expected);
+    print(" expected but ");
+    print_type(found);
+    print(" found\n");
+  }
 }
 
 uint64_t* get_variable_or_big_int(char* variable_or_big_int, uint64_t class) {
@@ -3880,9 +3882,6 @@ uint64_t help_call_codegen(uint64_t* entry, char* procedure) {
     } else {
       // procedure defined, use relative address
       emit_jal(REG_RA, get_address(entry) - binary_length);
-      //load_integer(get_address(entry));
-      //emit_jalr(REG_RA, current_temporary(), REG_ZR);
-      //tfree(1);
     }
   }
 
@@ -4833,13 +4832,13 @@ void compile_procedure(char* procedure, uint64_t type) {
   uint64_t parameters;
   uint64_t number_of_local_variable_bytes;
   uint64_t* entry;
-  uint64_t checkpoint_begin_procedure;
-  uint64_t checkpoint_end_procedure;
+  uint64_t checkpoint_begin_procedure; // **** INTERPRETER ****
+  uint64_t checkpoint_end_procedure; // **** INTERPRETER ****
   
   // assuming procedure is undefined
   is_undefined = 1;
 
-  checkpoint_begin_procedure = binary_length;
+  checkpoint_begin_procedure = binary_length; // **** INTERPRETER ****
 
   number_of_parameters = 0;
 
@@ -4932,11 +4931,14 @@ void compile_procedure(char* procedure, uint64_t type) {
           number_of_calls = number_of_calls + 1;
         }
       } else {
-        // procedure already defined
-        print_line_number("warning", line_number);      
+        // procedure already defined        
+
+        // **** BEGIN INTERPRETER ****   
         if (incremental == 0) {
+          print_line_number("warning", line_number);
           printf1("redefinition of procedure %s ignored\n", procedure);
         }
+        // **** END INTERPRETER ****
       }
     }
 
@@ -4982,12 +4984,17 @@ void compile_procedure(char* procedure, uint64_t type) {
 
     help_procedure_epilogue(number_of_parameters * REGISTERSIZE);
 
+    // **** BEGIN INTERPRETER ****
     // make jump to new method
     if (is_undefined == 0) {
       if (incremental) {
         if (string_compare(procedure, "main"))
-          printf1("redefinition of procedure %s ignored\n", procedure);
+          printf1("  Warning: Redefinition of procedure %s ignored\n", procedure);
         else {
+          // reset type of procedure if not the same
+          if (type != get_type(entry))
+            set_type(entry, type);
+
           checkpoint_end_procedure = binary_length;
           binary_length = get_address(entry);
 
@@ -5004,13 +5011,14 @@ void compile_procedure(char* procedure, uint64_t type) {
           // return
           emit_jalr(REG_ZR, REG_RA, 0);
 
-          printf2("redefinition of procedure %s will overwrite %s\n", procedure, procedure);
+          printf1("  Warning: Redefinition of procedure \"%s\"\n", procedure);
           
           // restore binary_length
           binary_length = checkpoint_end_procedure;
         }
       }
-    }    
+    }
+    // **** END INTERPRETER ****
 
   } else
     syntax_error_unexpected();
@@ -5026,6 +5034,9 @@ void compile_cstar() {
   uint64_t current_line_number;
   uint64_t initial_value;
   uint64_t* entry;
+  uint64_t allocated_memory_checkpoint; // **** INTERPRETER ****
+
+  allocated_memory_checkpoint = allocated_memory; // **** INTERPRETER ****
 
   while (symbol != SYM_EOF) {
     while (look_for_type()) {
@@ -5100,20 +5111,25 @@ void compile_cstar() {
         syntax_error_symbol(SYM_IDENTIFIER);
     }
 
+    // **** BEGIN INTERPRETER ****
     if (incremental) {
       if (syntax_error) {
+        
+        syntax_error = 0;
+
         // remove last entry of global symbol table
         if (latest_hashed_entry_address != (uint64_t*) 0) {
           *latest_hashed_entry_address = (uint64_t) get_next_entry((uint64_t*) *latest_hashed_entry_address);
-
-          allocated_memory = allocated_memory - REGISTERSIZE;
         }
-        eval_expression = 0;
-        syntax_error = 0;
+
+        // restore allocated memor
+        allocated_memory = allocated_memory_checkpoint;
         // undo last code generation by resetting binary_length
         binary_length = binary_length_checkpoint;
-        // reset function definition
-        reset_increment_eval_expres();
+
+        // reset eval function definition
+        if (eval_expression)
+          reset_increment_eval_expres();
 
       } else
         // so far everything had correct syntax
@@ -5127,6 +5143,7 @@ void compile_cstar() {
         write(source_fd, (uint64_t*)"increment_eval_expres();", string_length("increment_eval_expres();"));
       }
     }
+    // **** END INTERPRETER ****
   }
 }
 
@@ -5180,7 +5197,7 @@ void emit_bootstrapping() {
   uint64_t padding;
   uint64_t* entry;
 
-  if (incremental)
+  if (incremental)  // **** INTERPRETER ****
     // global pointer value is fixed to MAX_BINARY_LENGTH
     gp = MAX_BINARY_LENGTH;
 
@@ -5245,7 +5262,7 @@ void emit_bootstrapping() {
     // reset return register to initial return value
     emit_addi(REG_A0, REG_ZR, 0);
 
-    if (incremental) {
+    if (incremental) {  // **** INTERPRETER ****
       // when calling a procedure in the interpreter, this nop
       // will be overwritten with a jump to the procedure
       entry_point_incremental = binary_length;
@@ -6004,7 +6021,7 @@ void fixlink_relative(uint64_t from_address, uint64_t to_address) {
 void emit_data_word(uint64_t data, uint64_t offset, uint64_t source_line_number) {
   // assert: offset < 0
 
-  if (incremental)
+  if (incremental)  // **** INTERPRETER ****
     // data segment is ending at MAX_BINARY_LENGTH // TODO make it working without changing MAX_BINARY_LENGTH
     store_data(MAX_BINARY_LENGTH + offset, data);
   else
@@ -6359,6 +6376,7 @@ void implement_exit(uint64_t* context) {
     return;
   }
 
+  // **** BEGIN INTERPRETER ****
   if (incremental == 1) {
     if (incremental_type < 3) {
       if (incremental_type == 0) {
@@ -6366,7 +6384,7 @@ void implement_exit(uint64_t* context) {
       } else 
         printf1("  %d \n", (char*) sign_extend(get_exit_code(context), SYSCALL_BITWIDTH));
     }
-  }
+  } // **** END INTERPRETER ****
   else {
     printf4("%s: %s exiting with exit code %d and %.2dMB mallocated memory\n", selfie_name,
       get_name(context),
@@ -9962,7 +9980,7 @@ uint64_t mipster(uint64_t* to_context) {
   uint64_t timeout;
   uint64_t* from_context;
 
-  if (incremental == 0)
+  if (incremental == 0) // **** INTERPRETER ****
     print("mipster\n");
 
   timeout = TIMESLICE;
@@ -10335,7 +10353,7 @@ uint64_t selfie_run(uint64_t machine) {
     symbolic = 1;
   }
 
-  if (incremental)
+  if (incremental) // **** INTERPRETER ****
     init_memory(VIRTUALMEMORYSIZE / MEGABYTE);
   else if (machine != MONSTER)
     init_memory(atoi(peek_argument(0)));
@@ -12814,6 +12832,9 @@ void selfie_increment() {
       } else if (is_single_call()) {
         
         if (is_valid_call()) {
+          
+          // TODO:
+          // finde bug in global_symbol_table
           //if (report_undefined_procedures() == 0) {
           if (1) {
             // save address to jump to for later
@@ -12836,19 +12857,18 @@ void selfie_increment() {
               mipster(current_context);
               *(get_regs(current_context) + REG_A0) = 0;
             }
-            if (eval_expression)          
-              reset_increment_eval_expres();
-          } else
-            eval_expression = 0;
+          }
         }
-        else {
+        else
             print("  Not a valid call!\n");
-        }
+        // reset eval function entry
+        if (eval_expression)          
+          reset_increment_eval_expres();
       } else if (is_statement()) {     
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	reset_increment_file_cursor();
+	      reset_increment_file_cursor();
         // embed the expression in a function body
         // without return value (default return 0)
         source_fd = open_write_only(INCREMENT_FILENAME);
@@ -12861,7 +12881,7 @@ void selfie_increment() {
         eval_expression = 1;
         binary_length_rollback = binary_length;
 
-	reset_increment_file_cursor();
+	      reset_increment_file_cursor();
         // embed the expression in a function body
         // with return value
         source_fd = open_write_only(INCREMENT_FILENAME);
@@ -12976,7 +12996,10 @@ uint64_t compile_source() {
             get_symbol();
 
               if (symbol == SYM_RPARENTHESIS) {
-                return 1;
+                get_symbol();
+
+                if (symbol == SYM_SEMICOLON)
+                  return 1;
               }
           }
         }
@@ -12997,7 +13020,10 @@ uint64_t compile_quit_increment() {
           get_symbol();
 
           if (symbol == SYM_RPARENTHESIS) {
-            return 1;
+            get_symbol();
+
+            if (symbol == SYM_SEMICOLON)
+              return 1;
           }
         }
     }
@@ -13170,7 +13196,7 @@ uint64_t selfie() {
 
       if (string_compare(option, "-c"))
         selfie_compile();
-      else if (string_compare(option, "-i"))
+      else if (string_compare(option, "-i"))  // **** INTERPRETER ****
         selfie_increment();
 
       else if (number_of_remaining_arguments() == 0) {

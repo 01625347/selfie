@@ -8,7 +8,5 @@
 /*.orig
 selfie
 selfie.exe
-selfie.orig
-.increment
 manuscript/code/symbolic/*.smt
 manuscript/code/symbolic/*.btor2
